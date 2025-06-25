@@ -47,7 +47,6 @@ class WebSocketServer:
         self.behavior_mode = None
         self.last_displayed = None
         self.messages = self._load_messages()
-        self.locations = []
 
 
     def _load_messages(self):
@@ -242,14 +241,6 @@ class WebSocketServer:
 
         elif msg_json['type'] == 'screenshot':
             await self.send_message(PATH_CONTROL, msg_json)
-
-        elif msg_json['type'] == 'saved_locations':
-            self.locations = msg_json.get("data", [])
-            print(f"Received locations: {self.locations}")
-            await self.send_message(PATH_CONTROL, {
-                "type": "locationList",
-                "data": self.locations
-            })
 
     async def participant_handler(self, websocket, message):
         try:
