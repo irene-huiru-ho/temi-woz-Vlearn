@@ -134,6 +134,24 @@ class WebSocketServer:
             self.last_displayed = msg_json['payload']
             await self.send_message(PATH_TEMI, msg_json)
 
+        elif msg_json.get("type") == "image" and msg_json.get("data", "").startswith("data:image"):
+            import base64
+            from pathlib import Path
+
+            base64_data = msg_json["data"].split(",")[1]
+            filename = msg_json["filename"]
+
+            media_path = Path("participant_data/media") / filename
+            media_path.write_bytes(base64.b64decode(base64_data))
+            print(f"✅ [temi_handler] Saved image to {media_path}")
+
+            # Also update `last_displayed` and notify control if needed
+            self.last_displayed = filename
+            await self.send_message(PATH_CONTROL, {
+                "type": "newMedia",
+                "data": filename
+            })
+
         elif msg_json['command'] == 'displayFace':
             self.last_displayed = None
             await self.send_message(PATH_TEMI, msg_json)
@@ -184,6 +202,23 @@ class WebSocketServer:
         except Exception as e:
             print(f'[ERROR][temi_handler]: {e}')
             return
+        if msg_json.get("type") == "image" and msg_json.get("data", "").startswith("data:image"):
+            import base64
+            from pathlib import Path
+
+            base64_data = msg_json["data"].split(",")[1]
+            filename = msg_json["filename"]
+
+            media_path = Path("participant_data/media") / filename
+            media_path.write_bytes(base64.b64decode(base64_data))
+            print(f"✅ [temi_handler] Saved image to {media_path}")
+
+            self.last_displayed = filename
+            await self.send_message(PATH_CONTROL, {
+                "type": "newMedia",
+                "data": filename
+            })
+
         if msg_json['type'] == 'asr_result':
             self.messages.append({
                 'role': 'user',
@@ -229,6 +264,9 @@ class WebSocketServer:
                 'stopMovement', 'turnBy']:
             await self.send_message(PATH_TEMI, msg_json)
 
+    
+
+
 server = WebSocketServer()
 
 async def websocket_main():
@@ -246,8 +284,11 @@ async def websocket_main():
         await server.handle_connection(websocket, path)
 
 
+
+
 if __name__ == "__main__":
     asyncio.run(websocket_main())
+
 
 # server = WebSocketServer()
 # async def websocket_main():
