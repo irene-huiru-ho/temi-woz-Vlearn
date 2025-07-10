@@ -20,6 +20,12 @@ const WizardPage = () => {
   const [activeMediaContext, setActiveMediaContext] = useState(null);
   const [temiFiles,   setTemiFiles]   = useState(new Set());
   const [wizardFiles, setWizardFiles] = useState(new Set());
+  const displayedMediaRef = useRef(null)
+
+  useEffect(() => {
+    displayedMediaRef.current = displayedMedia
+  }, [displayedMedia])
+
 
   const getTimestamp = () => {
     return new Date().toLocaleTimeString([], {
@@ -31,7 +37,11 @@ const WizardPage = () => {
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const wsRef = useRef(null)
 
-  const handleSendToLLM = async (imageFilename, mode) => {
+  const handleSendToLLM = async (imageFilename, mode, userPrompt) => {
+    console.log("User said:", userPrompt);
+    if(userPrompt == null){
+      userPrompt = "";
+    }
     setActiveMediaContext({ filename: imageFilename, mode });
     setLog((prev) => [
       ...prev,
@@ -46,9 +56,11 @@ const WizardPage = () => {
         body: JSON.stringify({
           image_filename: imageFilename,
           mode: mode || "default",
+          user_prompt: userPrompt,
         }),
       });
       console.log("Sending to LLM with mode:", mode);
+      console.log(`sending to llm with prompt: ${userPrompt}`)
       const data = await res.json();
       const llmOutput = data.analysis || "No response from LLM";
       setLlmResponse(llmOutput);
@@ -94,8 +106,18 @@ const WizardPage = () => {
   const onWsMessage = (data) => {
     console.log('onWsMessage')
     console.log(data)
+    if (data.type === 'media_uploaded') {
+      const { filename } = data
+      setDisplayedMedia(filename)
+    }
     if (data.type === 'asr_result') {
       setLog((prev) => [...prev, `Received: ${data.data}`]);
+      if (displayedMediaRef.current) {
+        handleSendToLLM(
+          displayedMediaRef.current,"conversation",data.data
+        )
+        console.log(`user says ${data.data}`)
+      }
     } else if (data.type === 'assistant_response') {
       setLog((prev) => [...prev, `Temi: ${data.data}`]);
     } else if (data.type === 'suggested_response') {
@@ -128,12 +150,17 @@ const WizardPage = () => {
           return next;
         });
       }
+
+      setDisplayedMedia(filename);
+      console.log(displayedMedia);
+
     } else if (data.type === "saved_locations") {
       const locationList = data.data;
       setSavedLocations(locationList);
     } else if (data.type === "screenshot") {
       setScreenshotData(`data:image/jpeg;base64,${data.data}`);
     }
+
   };
 
 

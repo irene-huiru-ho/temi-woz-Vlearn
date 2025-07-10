@@ -4,6 +4,7 @@ from websockets.asyncio.server import serve
 from fastapi import WebSocketDisconnect
 import signal
 from llm_model import generate_response
+from chat_history import MESSAGES, save_messages
 
 
 PATH_TEMI = '/temi'
@@ -11,6 +12,7 @@ PATH_CONTROL = '/control'
 PATH_PARTICIPANT = '/participant'
 LOG_FILE = 'participant_data/log.log'
 MESSAGES_FILE = 'participant_data/messages.json'
+
 
 
 try:
@@ -62,7 +64,7 @@ class WebSocketServer:
 
     def save_messages(self):
         with open(MESSAGES_FILE, 'w') as f:
-            json.dump(self.messages, f, indent=4)
+            json.dump(MESSAGES, f, indent=4)
 
     async def handle_connection(self, websocket, ws_path):
         self.connections[ws_path].add(websocket)
@@ -216,10 +218,14 @@ class WebSocketServer:
             })
 
     async def temi_handler(self, websocket, message):
+        raw = message.strip()
+        if not raw:
+            return
         try:
-            msg_json = json.loads(message)
-        except Exception as e:
-            print(f'[ERROR][temi_handler]: {e}')
+            msg_json = json.loads(raw)
+        except json.JSONDecodeError:
+        # not JSON — could be a stray newline or ping — ignore
+            print(f"Ignoring non-JSON frame in temi_handler: {raw!r}")
             return
         if msg_json.get("type") == "image" and msg_json.get("data", "").startswith("data:image"):
             import base64
@@ -238,7 +244,7 @@ class WebSocketServer:
             await self.send_message(PATH_CONTROL, {
                 "type": "media_uploaded",
                 "filename": filename, 
-                "source": source
+                "source": "temi"
             })
         if msg_json['type'] == 'assistant_response':
             await self.send_message(PATH_CONTROL, msg_json)
@@ -246,11 +252,11 @@ class WebSocketServer:
 
         elif msg_json['type'] == 'asr_result':
             user_text = msg_json['data']
-            self.messages.append({'role': 'user','content': user_text})
-            self.save_messages()
+            MESSAGES.append({'role': 'user','content': user_text})
+            save_messages()
             await self.send_message(PATH_CONTROL, msg_json)
 
-            res = generate_response(self.messages)
+            res = generate_response(MESSAGES)
             if res:
                 await self.send_message(PATH_CONTROL, {
                     'type': 'suggested_response',
@@ -269,6 +275,8 @@ class WebSocketServer:
                     await self.send_message(PATH_TEMI, {
                         'type': 'start_listening'
                     })
+                MESSAGES.append({'role': 'assisstant','content': res})
+                save_messages()
         elif msg_json['type'] == 'saved_locations':
             locations = msg_json.get("data", [])
             print(f"Received locations: {locations}")

@@ -1,12 +1,15 @@
+from http.client import HTTPException
 import os
 import shutil
-import google.generativeai as genai
 import requests
 from PIL import Image, UnidentifiedImageError
 from io import BytesIO
 from pydantic import BaseModel
 import google.generativeai as genai
 from dotenv import load_dotenv
+import logging, traceback
+from chat_history import MESSAGES, save_messages
+from llm_model import generate_response
 
 from fastapi import (
     FastAPI, WebSocket, WebSocketDisconnect,
@@ -16,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from websocket_server import WebSocketServer, PATH_TEMI, PATH_CONTROL, PATH_PARTICIPANT
+from typing import Optional
 
 app = FastAPI()
 server = WebSocketServer()
@@ -24,24 +28,23 @@ UPLOAD_DIR = "participant_data/media"
 class AnalyzeRequest(BaseModel):
     image_filename: str
     mode: str
+    user_prompt: Optional[str] = None
 
 app.mount("/media", StaticFiles(directory=UPLOAD_DIR), name="media")
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise RuntimeError("Missing GEMINI_API_KEY")
-
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash-002")
 
-genai.configure(api_key="INSERT_API_KEY_HERE")
+
+#genai.configure(api_key="INSERT_API_KEY_HERE")
 
 
 # CORS is optional but useful during development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # adjust for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -194,25 +197,44 @@ async def get_media_list():
 @app.post("/api/analyze-media")
 async def analyze_media(request: AnalyzeRequest):
     file_path = os.path.join(UPLOAD_DIR, request.image_filename)
-
     if not os.path.exists(file_path):
-        return JSONResponse(content={"success": False, "error": "File not found"}, status_code=404)
+        raise HTTPException(404, "File not found")
 
-    # Choose different prompt based on mode
+    # record the user’s new turn
+    if request.user_prompt:
+        MESSAGES.append({"role": "user", "content": request.user_prompt})
+        save_messages()
+
+    # build the “base” instruction
     if request.mode == "conversation":
-        prompt = "Start a friendly conversation based on this media."
+        base = "Now carry on a friendly conversation about this image."
     elif request.mode == "suggestion":
-        prompt = "Provide a useful suggestion based on this media."
+        base = "Now offer a helpful suggestion based on this image."
     else:
-        prompt = "Analyze and describe this media."  # default fallback
+        base = "Now analyze and describe this image."
+
+    # weave the entire history into a single text prompt
+    history_text = []
+    for msg in MESSAGES:
+        speaker = "User" if msg["role"] == "user" else "Assistant"
+        history_text.append(f"{speaker}: {msg['content']}")
+    history_blob = "\n".join(history_text)
+
+    # final prompt—history + new instruction
+    text_prompt = f"{history_blob}\nAssistant, {base}"
 
     try:
         with Image.open(file_path) as image:
-            result = model.generate_content([prompt, image])
-
-        return {"success": True, "analysis": result.text}
-
+            # pass the text prompt *and* the image
+            result = model.generate_content([text_prompt, image])
+            reply = result.text
     except UnidentifiedImageError:
-        return JSONResponse(content={"success": False, "error": "File is not a valid image"}, status_code=400)
+        raise HTTPException(400, "File is not a valid image")
     except Exception as e:
-        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+        raise HTTPException(500, f"LLM error: {e}")
+
+    # save the assistant’s turn
+    MESSAGES.append({"role": "assistant", "content": reply})
+    save_messages()
+
+    return {"success": True, "analysis": reply}
