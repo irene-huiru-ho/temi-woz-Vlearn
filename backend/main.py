@@ -1,5 +1,6 @@
 import os
 import shutil
+from typing import Optional
 import google.generativeai as genai
 import requests
 from PIL import Image, UnidentifiedImageError
@@ -23,6 +24,8 @@ UPLOAD_DIR = "participant_data/media"
 class AnalyzeRequest(BaseModel):
     image_filename: str
     mode: str
+    age: Optional[int] = None
+    focus_area: Optional[str] = None
 
 app.mount("/media", StaticFiles(directory=UPLOAD_DIR), name="media")
 
@@ -222,6 +225,9 @@ async def analyze_media(request: AnalyzeRequest):
 
     if not os.path.exists(file_path):
         return JSONResponse(content={"success": False, "error": "File not found"}, status_code=404)
+    
+    age_text   = f"\nChild’s age: {request.age} years old." if request.age else ""
+    focus_text = f"\nLearning focus: {request.focus_area}" if request.focus_area else ""
 
     # Import the new Gemini-based function
     from llm_model import generate_response_with_context
@@ -234,10 +240,15 @@ async def analyze_media(request: AnalyzeRequest):
     else:
         query = "Briefly describe what you see in this image."
 
+    full_prompt = (
+        f"{query}\n"
+        f"{age_text}\n"
+        f"{focus_text}"
+    )
     try:
         # Use the new Gemini-based function
         result = generate_response_with_context(
-            query=query,
+            full_prompt=full_prompt,
             img_path=file_path,
             conversation_context=None
         )

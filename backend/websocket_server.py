@@ -43,6 +43,8 @@ class WebSocketServer:
         self.messages = self._load_messages()
         self.latest_image = None
         self.image_question_mode = False  # Track if user is asking questions about an image
+        self.child_age = None
+        self.focus_area = None
 
     def _load_messages(self):
         try:
@@ -110,6 +112,15 @@ class WebSocketServer:
         if 'command' not in msg_json:
             return
             
+        cmd = msg_json.get('command')
+        if not cmd:
+             return
+        if cmd == 'updateSettings':
+            self.child_age  = msg_json['payload'].get('age')
+            self.focus_area = msg_json['payload'].get('focus_area')
+            print(f"[INFO] Settings updated → age={self.child_age}, focus={self.focus_area}")
+            return
+        
         if msg_json['command'] == 'speak':
             self.messages.append({
                 'role': 'assistant',
@@ -127,8 +138,9 @@ class WebSocketServer:
             if with_image and self.latest_image and os.path.exists(self.latest_image):
                 img_path = self.latest_image
                 print(f'[INFO] Using image for response generation: {img_path}')
-            
-            res = generate_response(self.messages, img_path)
+            child_age = payload.get('age', None)
+            focus = payload.get('focus_area', None)
+            res = generate_response(self.messages, img_path, child_age = self.child_age, focus = self.focus_area)
             if res:
                 msg_2 = {
                     'type': 'suggested_response',
@@ -189,6 +201,9 @@ class WebSocketServer:
                 }
                 await self.send_message(PATH_CONTROL, msg)
 
+
+    
+
     async def temi_handler(self, websocket, message):
         try:
             msg_json = json.loads(message)
@@ -215,7 +230,7 @@ class WebSocketServer:
                 img_path = self.latest_image
                 print(f'[INFO] Including image in response (question mode active): {img_path}')
             
-            res = generate_response(self.messages, img_path)
+            res = generate_response(self.messages, img_path, child_age = self.child_age, focus_area = self.focus_area)
             if res:
                 msg_2 = {
                     'type': 'suggested_response',

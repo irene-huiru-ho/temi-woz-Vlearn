@@ -33,6 +33,11 @@ The family info:
 The latest USER input is: {command}.
 {image_prompt}
 
+Age is: {AGE_INFO}
+
+Focus is: {FOCUS_INFO}
+
+
 In plain text, what is your response?
 '''.strip()
 
@@ -67,12 +72,16 @@ def format_conversation_for_gemini(all_messages: List[Dict]) -> str:
     return conversation
 
 
-def generate_response(all_messages: List[Dict], img_path: Optional[str] = None) -> str:
+def generate_response(all_messages: List[Dict], img_path: Optional[str] = None, child_age: Optional[int] = None, focus_area=None) -> str:
     """Generate response using Gemini Flash 2.5 model."""
     if not all_messages:
         print('[WARNING] No messages provided')
         return ''
     
+    age_info = f"\nChild’s age: {child_age} years old." if child_age else ""
+    focus_info = f"\nLearning focus: {focus_area}"      if focus_area else ""
+
+
     try:
         # Get the latest user message
         last_message_content = all_messages[-1].get('content', '')
@@ -82,9 +91,10 @@ def generate_response(all_messages: List[Dict], img_path: Optional[str] = None) 
         
         # Prepare the image prompt text
         image_prompt = IMAGE_PROMPT_TEXT if img_path and os.path.exists(img_path) else ''
-        
+
         # Create the full prompt with system instructions and conversation context
         full_prompt = f"""
+
 {SYSTEM_PROMPT}
 
 Previous conversation:
@@ -93,9 +103,14 @@ Previous conversation:
 {MAIN_PROMPT.format(
     family_info=FAMILY_INFO_STR,
     command=last_message_content,
-    image_prompt=image_prompt
+    image_prompt=image_prompt, 
+    AGE_INFO    = age_info,
+    FOCUS_INFO  = focus_info,
+
 )}
 """.strip()
+        
+        print("prompt" + full_prompt)
         
         # Prepare content for Gemini
         content_parts = [full_prompt]
