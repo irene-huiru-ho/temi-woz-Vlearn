@@ -49,7 +49,7 @@ class WebSocketServer:
         self.messages = self._load_messages()
         self.locations = []
         self.automation = False
-        self.last_source = None
+        self.last_source = "temi"
 
 
     def _load_messages(self):
@@ -108,10 +108,10 @@ class WebSocketServer:
         cmd = msg_json.get('command')
         if not cmd:
             return
-        if cmd == 'takePicture':
-            self.last_source = 'wizard'
-            await self.send_message(PATH_TEMI, msg_json)
-            return
+        # if cmd == 'takePicture':
+        #     self.last_source = 'wizard'
+        #     await self.send_message(PATH_TEMI, msg_json)
+        #     return
 
         if msg_json['command'] == 'speak':
             self.messages.append({
@@ -157,13 +157,18 @@ class WebSocketServer:
                 'queryLocations', 'goTo']:
             await self.send_message(PATH_TEMI, msg_json)
             
-        elif msg_json['command'] == 'takePicture':
+        elif cmd == 'takePicture':
+            # Only set last_source if explicitly marked as coming from wizard
+            source = msg_json.get('source')
+            if source == 'wizard':
+                self.last_source = 'wizard'
+            else:
+                self.last_source = None  # don't override if not set
+
+            msg_json['source'] = source or 'wizard'  # fallback for Temi-side clients
             await self.send_message(PATH_TEMI, msg_json)
-            await self.send_message(PATH_CONTROL, {
-                "type":     "media_uploaded",
-                "filename": msg_json["payload"] or "<timestamp>",
-                "source":   "wizard"
-            })
+
+
 
 
         elif msg_json['command'] == 'navigateCamera':
@@ -218,8 +223,8 @@ class WebSocketServer:
     async def temi_handler(self, websocket, message):
         try:
             msg_json = json.loads(message)
-        except Exception as e:
-            print(f'[ERROR][temi_handler]: {e}')
+        except json.JSONDecodeError:
+            print(f'[DEBUG] Non-JSON message received: {message}')
             return
         if msg_json.get("type") == "image" and msg_json.get("data", "").startswith("data:image"):
             import base64
