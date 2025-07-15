@@ -81,6 +81,31 @@ async def upload_file(file: UploadFile = File(...)):
     with open(save_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
+    try:
+        from pathlib import Path
+        import json
+        
+        media_sources_file = Path("participant_data/media_sources.json")
+        
+        if media_sources_file.exists():
+            with media_sources_file.open("r") as f:
+                media_sources = json.load(f)
+        else:
+            media_sources = {}
+        
+        source = server.last_source or 'wizard'  
+        media_sources[file.filename] = source
+        
+        server.last_source = None
+        
+        with media_sources_file.open("w") as f:
+            json.dump(media_sources, f, indent=2)
+        
+        print(f" [upload_file] Updated media_sources.json with {file.filename}: {source}")
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to update media_sources.json: {e}")
+
     await server.send_message(PATH_CONTROL, {
         "type": "media_uploaded",
         "filename": file.filename,
