@@ -245,10 +245,11 @@ async def analyze_media(request: AnalyzeRequest):
         f"{age_text}\n"
         f"{focus_text}"
     )
+
     try:
         # Use the new Gemini-based function
         result = generate_response_with_context(
-            full_prompt=full_prompt,
+            query=full_prompt,
             img_path=file_path,
             conversation_context=None
         )

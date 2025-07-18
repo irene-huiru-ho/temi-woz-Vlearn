@@ -259,7 +259,6 @@ const WizardPage = () => {
   };
 
   return (
-    <div style={{ height: "100%", overflowY: "auto" }}>
       <div className="container-fluid p-0" style={{ 
         height: '100vh', 
         position: 'relative',
@@ -832,7 +831,6 @@ const WizardPage = () => {
           </div>
         </div>
       </div>
-    </div>
   );
 };
 
