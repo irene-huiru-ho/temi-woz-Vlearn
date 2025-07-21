@@ -32,31 +32,24 @@ if not GEMINI_API_KEY:
     raise RuntimeError("Missing GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash-exp")
+model = genai.GenerativeModel("gemini-1.5-flash-002")
 
-# # CORS is optional but useful during development
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # adjust for production
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# Add this BEFORE any routes or other middleware
+# CORS is optional but useful during development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # Change this to False when using "*"
+    allow_origins=["*"],  # adjust for production
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.websocket(PATH_TEMI)
 async def temi_ws(websocket: WebSocket):
     print(PATH_TEMI)
     await websocket.accept()
     await server.handle_connection(websocket, PATH_TEMI)
+
 
 @app.websocket(PATH_CONTROL)
 async def control_ws(websocket: WebSocket):
@@ -70,6 +63,7 @@ async def participant_ws(websocket: WebSocket):
     await websocket.accept()
     await server.handle_connection(websocket, PATH_PARTICIPANT)
 
+
 @app.get("/status")
 def get_status():
     return {
@@ -82,46 +76,22 @@ def get_status():
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    # Create upload directory if it doesn't exist
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    
-    # Sanitize filename to prevent directory traversal
-    safe_filename = os.path.basename(file.filename)
-    save_path = os.path.join(UPLOAD_DIR, safe_filename)
+    save_path = os.path.join(UPLOAD_DIR, file.filename)
 
-    try:
-        with open(save_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+    with open(save_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
 
-        # Check if it's an image file
-        is_image = safe_filename.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"))
-        
-        # Notify websocket server about the new file
-        await server.send_message(PATH_CONTROL, {
-            "type": "media_uploaded",
-            "filename": safe_filename,
-            "url": f"/view/{safe_filename}",
-            "is_image": is_image
-        })
+    await server.send_message(PATH_CONTROL, {
+        "type": "media_uploaded",
+        "filename": file.filename,
+        "url": f"/view/{file.filename}"
+    })
 
-        # If it's an image, set it as the latest image in the server
-        if is_image:
-            server.set_latest_image(save_path)
-            print(f'[INFO] Image uploaded and set as latest: {save_path}')
-
-        return {
-            "status": "success",
-            "filename": safe_filename,
-            "path": save_path,
-            "is_image": is_image
-        }
-        
-    except Exception as e:
-        print(f'[ERROR] Failed to save uploaded file: {e}')
-        return JSONResponse(
-            content={"status": "error", "message": "Failed to save file"}, 
-            status_code=500
-        )
+    return {
+        "status": "success",
+        "filename": file.filename,
+        "path": save_path
+    }
 
 # mostly for thumbnails and Temi display
 @app.get("/view/{filename}", response_class=HTMLResponse)
@@ -149,6 +119,7 @@ async def view_media(filename: str, request: Request):
       </body>
     </html>
     """
+
 
 # Not used for now but is available anyway
 @app.get("/media-list", response_class=HTMLResponse)
@@ -223,30 +194,21 @@ async def analyze_media(request: AnalyzeRequest):
     if not os.path.exists(file_path):
         return JSONResponse(content={"success": False, "error": "File not found"}, status_code=404)
 
-    # Import the new Gemini-based function
-    from llm_model import generate_response_with_context
-    
-    # UPDATED: Much shorter, more natural conversation prompts
+    # Choose different prompt based on mode
     if request.mode == "conversation":
-        query = "Say hi! What learning opportunities do you see in this picture? Keep it brief and friendly."
+        prompt = "Start a friendly conversation based on this media."
     elif request.mode == "suggestion":
-        query = "Give 1-2 useful suggestions of what learning opportunities you see based on this image."
+        prompt = "Provide a useful suggestion based on this media."
     else:
-        query = "Briefly describe what you see in this image."
+        prompt = "Analyze and describe this media."  # default fallback
 
     try:
-        # Use the new Gemini-based function
-        result = generate_response_with_context(
-            query=query,
-            img_path=file_path,
-            conversation_context=None
-        )
+        with Image.open(file_path) as image:
+            result = model.generate_content([prompt, image])
 
-        if result:
-            return {"success": True, "analysis": result}
-        else:
-            return JSONResponse(content={"success": False, "error": "Failed to generate analysis"}, status_code=500)
+        return {"success": True, "analysis": result.text}
 
+    except UnidentifiedImageError:
+        return JSONResponse(content={"success": False, "error": "File is not a valid image"}, status_code=400)
     except Exception as e:
-        print(f'[ERROR] analyze_media: {e}')
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)

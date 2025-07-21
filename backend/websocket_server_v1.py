@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 from websockets.asyncio.server import serve
 from fastapi import WebSocketDisconnect
 import signal
@@ -26,6 +25,13 @@ def log_event(event):
     pass
 
 
+
+'''
+photo, video
+    - display 
+    - capture
+'''
+
 PASSIVE = 'passive'
 REACTIVE = 'reactive'
 PROACTIVE = 'proactive'
@@ -41,8 +47,10 @@ class WebSocketServer:
         self.behavior_mode = None
         self.last_displayed = None
         self.messages = self._load_messages()
-        self.latest_image = None
-        self.image_question_mode = False  # Track if user is asking questions about an image
+        self.locations = []
+        self.automation = False
+        self.last_source = None
+
 
     def _load_messages(self):
         try:
@@ -55,21 +63,6 @@ class WebSocketServer:
     def save_messages(self):
         with open(MESSAGES_FILE, 'w') as f:
             json.dump(self.messages, f, indent=4)
-
-    def set_latest_image(self, image_path: str):
-        """Set the latest image path."""
-        self.latest_image = image_path
-        print(f'[INFO] Latest image set: {image_path}')
-
-    def activate_image_question_mode(self):
-        """Activate image question mode - next user queries will include the current image."""
-        self.image_question_mode = True
-        print(f'[INFO] Image question mode activated for image: {self.latest_image}')
-
-    def deactivate_image_question_mode(self):
-        """Deactivate image question mode."""
-        self.image_question_mode = False
-        print('[INFO] Image question mode deactivated')
 
     async def handle_connection(self, websocket, ws_path):
         self.connections[ws_path].add(websocket)
@@ -100,16 +93,26 @@ class WebSocketServer:
         print(f'Sending message to {group}: {message}')
         for connection in self.connections[group]:
             await connection.send_json(message)
+            # try:
+            #     await connection.send(json.dumps(message))
+            # except Exception as e:
+            #     print(e)
 
     async def control_handler(self, websocket, message):
+        # TODO: Check if Temi wants message or msg_json
         try:
             msg_json = json.loads(message)
         except Exception as e:
             print(f'[ERROR][control_handler]: {e}')
             return
-        if 'command' not in msg_json:
+        cmd = msg_json.get('command')
+        if not cmd:
             return
-            
+        if cmd == 'takePicture':
+            self.last_source = 'wizard'
+            await self.send_message(PATH_TEMI, msg_json)
+            return
+
         if msg_json['command'] == 'speak':
             self.messages.append({
                 'role': 'assistant',
@@ -117,46 +120,51 @@ class WebSocketServer:
             })
             self.save_messages()
             await self.send_message(PATH_TEMI, msg_json)
+            await self.send_message(PATH_CONTROL, {
+                'type': 'assistant_response',
+                'data': msg_json['payload']
+            })
+            return
 
         elif msg_json['command'] == 'generate_response':
-            # Handle manual generate response request
-            payload = msg_json.get('payload', {})
-            with_image = payload.get('with_image', False)
-            
             img_path = None
-            if with_image and self.latest_image and os.path.exists(self.latest_image):
-                img_path = self.latest_image
-                print(f'[INFO] Using image for response generation: {img_path}')
-            
+            with_image = msg_json['payload']
+            if with_image:
+                # TODO
+                # capture an image from Temi
+                # include the path 
+                # img_path = 
+                pass
             res = generate_response(self.messages, img_path)
             if res:
                 msg_2 = {
                     'type': 'suggested_response',
-                    'data': res,
-                    'includes_image': img_path is not None,
-                    'image_path': img_path
+                    'data': res
                 }
                 await self.send_message(PATH_CONTROL, msg_2)
 
         elif msg_json['command'] == 'displayMedia':
             self.last_displayed = msg_json['payload']
-            # If displaying an image, set it as latest image
-            media_path = os.path.join("participant_data/media", msg_json['payload'])
-            if self._is_image_file(msg_json['payload']):
-                self.set_latest_image(media_path)
             await self.send_message(PATH_TEMI, msg_json)
 
         elif msg_json['command'] == 'displayFace':
             self.last_displayed = None
-            # Deactivate image question mode when showing face
-            self.deactivate_image_question_mode()
             await self.send_message(PATH_TEMI, msg_json)
 
         elif msg_json['command'] in [
-                'skidJoy', 'takePicture', 'refreshScreenShot',
+                'skidJoy', 'refreshScreenShot',
                 'tiltBy', 'tiltAngle', 'stopMovement', 'turnBy',
                 'queryLocations', 'goTo']:
             await self.send_message(PATH_TEMI, msg_json)
+            
+        elif msg_json['command'] == 'takePicture':
+            await self.send_message(PATH_TEMI, msg_json)
+            await self.send_message(PATH_CONTROL, {
+                "type":     "media_uploaded",
+                "filename": msg_json["payload"] or "<timestamp>",
+                "source":   "wizard"
+            })
+
 
         elif msg_json['command'] == 'navigateCamera':
             if self.behavior_mode == PASSIVE:
@@ -165,9 +173,12 @@ class WebSocketServer:
             await self.send_message(PATH_TEMI, msg_json)
 
         elif msg_json['command'] == 'startVideo':
+            # TODO: behavior should differ depending on 
+            # self.behavior_mode
             await self.send_message(PATH_TEMI, msg_json)
 
         elif msg_json['command'] == 'stopVideo':
+            # TODO:
             await self.send_message(PATH_TEMI, msg_json)
 
         elif msg_json['command'] == 'changeMode':
@@ -188,6 +199,21 @@ class WebSocketServer:
                     }
                 }
                 await self.send_message(PATH_CONTROL, msg)
+        elif cmd == 'startAutomation':
+            print("Automation ON")
+            self.automation = True
+            await self.send_message(PATH_CONTROL, {
+                'type': 'automation',
+                'data': True
+            })
+
+        elif cmd == 'stopAutomation':
+            print("Automation OFF")
+            self.automation = False
+            await self.send_message(PATH_CONTROL, {
+                'type': 'automation',
+                'data': False
+            })
 
     async def temi_handler(self, websocket, message):
         try:
@@ -195,83 +221,54 @@ class WebSocketServer:
         except Exception as e:
             print(f'[ERROR][temi_handler]: {e}')
             return
-            
-        if msg_json['type'] == 'asr_result':
-            user_query = msg_json['data']
-            
-            # Add user message to conversation
-            self.messages.append({
-                'role': 'user',
-                'content': user_query
+        if msg_json.get("type") == "image" and msg_json.get("data", "").startswith("data:image"):
+            import base64
+            from pathlib import Path
+
+            base64_data = msg_json["data"].split(",")[1]
+            filename = msg_json["filename"]
+
+            media_path = Path("participant_data/media") / filename
+            media_path.write_bytes(base64.b64decode(base64_data))
+            print(f"✅ [temi_handler] Saved image to {media_path}")
+            source = self.last_source or 'temi'
+            # reset the flag
+            self.last_source = None
+            self.last_displayed = filename
+            await self.send_message(PATH_CONTROL, {
+                "type": "media_uploaded",
+                "filename": filename, 
+                "source": source
             })
-            self.save_messages()
-            
-            # Send ASR result to control panel
+        if msg_json['type'] == 'assistant_response':
             await self.send_message(PATH_CONTROL, msg_json)
-            
-            # Generate response - include image if we're in image question mode
-            img_path = None
-            if self.image_question_mode and self.latest_image and os.path.exists(self.latest_image):
-                img_path = self.latest_image
-                print(f'[INFO] Including image in response (question mode active): {img_path}')
-            
-            res = generate_response(self.messages, img_path)
+            print(f"[temi_handler] Received message: {msg_json}")
+
+        elif msg_json['type'] == 'asr_result':
+            user_text = msg_json['data']
+            self.messages.append({'role': 'user','content': user_text})
+            self.save_messages()
+            await self.send_message(PATH_CONTROL, msg_json)
+
+            res = generate_response(self.messages)
             if res:
-                msg_2 = {
+                await self.send_message(PATH_CONTROL, {
                     'type': 'suggested_response',
-                    'data': res,
-                    'includes_image': img_path is not None,
-                    'image_path': img_path,
-                    'user_query': user_query,
-                    'image_question_mode': self.image_question_mode
-                }
-                await self.send_message(PATH_CONTROL, msg_2)
-        
-        elif msg_json['type'] == 'picture_taken':
-            # Handle when Temi takes a picture
-            image_filename = msg_json.get('data', {}).get('filename')
-            if image_filename:
-                image_path = os.path.join("participant_data/media", image_filename)
-                self.set_latest_image(image_path)
-                
-                # Notify control panel
-                response_msg = {
-                    'type': 'picture_taken',
-                    'data': {
-                        'filename': image_filename,
-                        'path': image_path,
-                        'ready_for_questions': True
-                    }
-                }
-                await self.send_message(PATH_CONTROL, response_msg)
+                    'data': res
+                })
 
-        elif msg_json['type'] == 'start_image_questions':
-            # Handle when user clicks "start asking questions" button on Temi display
-            self.activate_image_question_mode()
-            
-            # Notify control panel that image question mode is now active
-            response_msg = {
-                'type': 'image_question_mode_activated',
-                'data': {
-                    'image_path': self.latest_image,
-                    'message': 'Image question mode activated. User can now ask questions about the picture.'
-                }
-            }
-            await self.send_message(PATH_CONTROL, response_msg)
-
-        elif msg_json['type'] == 'stop_image_questions':
-            # Handle when user stops asking questions about the image
-            self.deactivate_image_question_mode()
-            
-            # Notify control panel
-            response_msg = {
-                'type': 'image_question_mode_deactivated',
-                'data': {
-                    'message': 'Image question mode deactivated.'
-                }
-            }
-            await self.send_message(PATH_CONTROL, response_msg)
-        
+                if self.automation:
+                    await self.send_message(PATH_TEMI, {
+                        'command': 'speak',
+                        'payload': res
+                    })
+                    await self.send_message(PATH_CONTROL, {
+                        'type': 'assistant_response',
+                        'data': res
+                    })
+                    await self.send_message(PATH_TEMI, {
+                        'type': 'start_listening'
+                    })
         elif msg_json['type'] == 'saved_locations':
             locations = msg_json.get("data", [])
             print(f"Received locations: {locations}")
@@ -279,12 +276,20 @@ class WebSocketServer:
 
         elif msg_json['type'] == 'screenshot':
             await self.send_message(PATH_CONTROL, msg_json)
+        
+        elif msg_json['type'] == 'saved_locations':
+            self.locations = msg_json.get("data", [])
+            print(f"Received locations: {self.locations}")
+            await self.send_message(PATH_CONTROL, {
+                "type": "locationList",
+                "data": self.locations
+            })
 
     async def participant_handler(self, websocket, message):
         try:
             msg_json = json.loads(message)
         except Exception as e:
-            print(f'[ERROR][participant_handler]: {e}')
+            print(f'[ERROR][control_handler]: {e}')
             return
         if 'command' not in msg_json:
             return
@@ -293,9 +298,37 @@ class WebSocketServer:
                 'stopMovement', 'turnBy']:
             await self.send_message(PATH_TEMI, msg_json)
 
-    def _is_image_file(self, filename: str) -> bool:
-        """Check if file is an image."""
-        if not filename:
-            return False
-        lower = filename.lower()
-        return lower.endswith((".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"))
+
+server = WebSocketServer()
+
+async def websocket_main():
+    async def handler(websocket, path):
+        print(f"[INFO] WebSocket requested path: {path}")
+
+        path = path.rstrip('/').split('?')[0]
+
+        if path not in [PATH_TEMI, PATH_CONTROL, PATH_PARTICIPANT]:
+            print(f"[ERROR] Unknown path {path}")
+            await websocket.close()
+            return
+        
+        await server.handle_connection(websocket, path)
+
+if __name__ == "__main__":
+    asyncio.run(websocket_main())
+# server = WebSocketServer()
+# async def websocket_main():
+#     async def handler(websocket):
+#         await server.handle_connection(websocket)
+
+#     server_proc = await serve(handler, "", 9090)
+#     print("🚀 WebSocket server running on port 9090")
+
+#     try:
+#         await asyncio.Future()  # Run forever (until Ctrl+C)
+#     except KeyboardInterrupt:
+#         print("🛑 KeyboardInterrupt received, shutting down...")
+#     finally:
+#         server_proc.close()
+#         await server_proc.wait_closed()
+#         print("✅ Server stopped cleanly")

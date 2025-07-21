@@ -9,6 +9,7 @@ export default function MediaList({
 }) {
   const [files, setFiles] = useState([]);
   const [hoveredImage, setHoveredImage] = useState(null);
+  
   const goToLocation = async (filename) => {
     const properName = filename.toLowerCase();
     console.log("Sending goTo for:", properName);
@@ -21,7 +22,10 @@ export default function MediaList({
   useEffect(() => {
     fetch("http://localhost:8000/api/media-list")
       .then((res) => res.json())
-      .then((data) => setFiles(data.files || []))
+      .then((data) => {
+        console.log("API response:", data); // Debug log
+        setFiles(data.files || []);
+      })
       .catch((err) => console.error("Failed to fetch media list:", err));
   }, []);
 
@@ -41,6 +45,33 @@ export default function MediaList({
     }
   };
 
+  // Helper function to get filename from file (handles both string and object)
+  const getFilename = (file) => {
+    if (typeof file === 'string') {
+      return file; // Old format: file is just the filename string
+    }
+    return file?.filename || 'unknown'; // New format: file is an object with filename property
+  };
+
+  // Helper function to get display name
+  const getDisplayName = (file) => {
+    if (typeof file === 'string') {
+      return file; // Old format: use filename as display name
+    }
+    // New format: use display_name if available, otherwise filename without extension
+    return file?.display_name || file?.filename?.replace(/\.[^/.]+$/, "") || 'unknown';
+  };
+
+  // Helper function to get source badge
+  const getSourceBadge = (file) => {
+    if (typeof file === 'string') {
+      // Old format: check temiFiles set
+      return temiFiles.has(file) ? "Temi" : null;
+    }
+    // New format: use source from API
+    return file?.source || (temiFiles.has(file?.filename) ? "temi" : "wizard");
+  };
+
   return (
     <div className="mt-4">
       <h4>📁 Uploaded Media</h4>
@@ -57,9 +88,14 @@ export default function MediaList({
       >
         <div className="d-flex flex-wrap gap-4 p-3">
           {files.map((file, idx) => {
-            const isImage = /\.(jpg|jpeg|png|gif)$/i.test(file);
-            const isVideo = /\.(mp4|webm)$/i.test(file);
-            const mediaUrl = `http://localhost:8000/media/${file}`;
+            // Get the actual filename to work with
+            const filename = getFilename(file);
+            const displayName = getDisplayName(file);
+            const source = getSourceBadge(file);
+            
+            const isImage = /\.(jpg|jpeg|png|gif)$/i.test(filename);
+            const isVideo = /\.(mp4|webm)$/i.test(filename);
+            const mediaUrl = `http://localhost:8000/media/${filename}`;
 
             return (
               <div
@@ -69,62 +105,66 @@ export default function MediaList({
                   maxWidth: "200px",
                   flex: "0 0 auto",
                   cursor: "pointer",
-                  justifyContent: "flex-start", // aligns content to the top
+                  justifyContent: "flex-start",
                   alignItems: "center",
-                  height: "240px", // increase height to fit label
+                  height: "260px", // Increased to accommodate source badge
                   display: "flex",
                   flexDirection: "column",
                 }}
               >
-                {/* Filename shown above image */}
-                <div
-                  style={{
-                    fontSize: "0.75rem",
-                    fontWeight: 500,
-                    color: "#333",
-                    marginBottom: "6px",
-                    maxWidth: "100%",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={file} // show full filename on hover
-                >
-                  {file}
+                {/* Filename and source badge shown above image */}
+                <div style={{ marginBottom: "6px", width: "100%" }}>
+                  <div
+                    style={{
+                      fontSize: "0.75rem",
+                      fontWeight: 500,
+                      color: "#333",
+                      marginBottom: "4px",
+                      maxWidth: "100%",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={filename} // show full filename on hover
+                  >
+                    {displayName}
+                  </div>
+                  
+                  {/* Source badge */}
+                  {source && (
+                    <div style={{ marginBottom: "4px" }}>
+                      <span
+                        style={{
+                          background: source === "temi" ? "#4CAF50" : "#2196F3",
+                          color: "white",
+                          padding: "2px 8px",
+                          fontSize: "0.65rem",
+                          borderRadius: "12px",
+                          fontWeight: "500"
+                        }}
+                      >
+                        {source === "temi" ? "📱 Temi Robot" : "🧙‍♂️ Wizard Dashboard"}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div
                   style={{ position: "relative", display: "inline-block" }}
-                  onMouseEnter={() => setHoveredImage(file)}
+                  onMouseEnter={() => setHoveredImage(filename)}
                   onMouseLeave={() => setHoveredImage(null)}
                 >
-                {temiFiles.has(file) && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      top:  4,
-                      right: 4,
-                      background: "#0d6efd",
-                      color: "#fff",
-                      padding: "2px 6px",
-                      fontSize: "0.6rem",
-                      borderRadius: "4px",
-                      zIndex: 10
-                    }}
-                  >
-                    Temi
-                  </span>
-                )} 
                   {isImage && (
                     <img
                       src={mediaUrl}
-                      alt={file}
+                      alt={displayName}
                       style={{
                         maxWidth: "100%",
-                        maxHeight: "200px",
-                        border: displayedMedia === file && "5px solid #0d6efd",
+                        maxHeight: "180px", // Reduced to accommodate badges
+                        border: displayedMedia === filename ? "5px solid #0d6efd" : "1px solid #ddd",
+                        borderRadius: "4px"
                       }}
-                      onClick={() => handleClickWithConfirm(file)}
+                      onClick={() => handleClickWithConfirm(filename)}
                     />
                   )}
 
@@ -134,14 +174,15 @@ export default function MediaList({
                       controls
                       style={{
                         maxWidth: "100%",
-                        maxHeight: "200px",
-                        border: displayedMedia === file && "5px solid #0d6efd",
+                        maxHeight: "180px", // Reduced to accommodate badges
+                        border: displayedMedia === filename ? "5px solid #0d6efd" : "1px solid #ddd",
+                        borderRadius: "4px"
                       }}
-                      onClick={() => handleClickWithConfirm(file)}
+                      onClick={() => handleClickWithConfirm(filename)}
                     />
                   )}
 
-                  {hoveredImage === file && (
+                  {hoveredImage === filename && (
                     <div
                       style={{
                         position: "absolute",
@@ -155,14 +196,14 @@ export default function MediaList({
                         flexDirection: "column",
                         gap: "6px",
                         zIndex: 10,
-                        width: "140px", // consistent button width
+                        width: "140px",
                       }}
                     >
                       <button
                         className="btn btn-sm btn-outline-primary w-100"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleSendToLLM(file, "conversation");
+                          handleSendToLLM(filename, "conversation");
                         }}
                       >
                         Start Conversation
@@ -172,7 +213,7 @@ export default function MediaList({
                         className="btn btn-sm btn-outline-secondary w-100"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleSendToLLM(file, "suggestion");
+                          handleSendToLLM(filename, "suggestion");
                         }}
                       >
                         Provide Suggestion
@@ -182,7 +223,7 @@ export default function MediaList({
                         className="btn btn-sm btn-outline-success w-100"
                         onClick={(e) => {
                           e.stopPropagation();
-                          goToLocation(file);
+                          goToLocation(filename);
                         }}
                       >
                         Go to Location
