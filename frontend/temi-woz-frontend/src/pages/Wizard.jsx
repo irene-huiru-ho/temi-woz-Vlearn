@@ -27,6 +27,13 @@ const WizardPage = () => {
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [showSessionPanel, setShowSessionPanel] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // NEW: Prompt configuration state
+  const [childAge, setChildAge] = useState(5);
+  const [conversationFocus, setConversationFocus] = useState('Open-ended');
+  const [customMessage, setCustomMessage] = useState('');
+  const [showConfig, setShowConfig] = useState(false);
+  const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
 
   const wsRef = useRef(null);
   const logEndRef = useRef(null);
@@ -90,15 +97,34 @@ const WizardPage = () => {
       const response = await fetch('http://localhost:8000/api/session/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ family_id: familyId })
+        body: JSON.stringify({ 
+          family_id: familyId,
+          child_age: childAge,
+          conversation_focus: conversationFocus,
+          custom_message: customMessage.trim()
+        })
       });
       
       const data = await response.json();
       if (data.status === 'success') {
-        setLog(prev => [...prev, `[${getTimestamp()}] 🟢 SESSION STARTED: ${data.family_id}`]);
+        setLog(prev => [...prev, `[${getTimestamp()}] 🟢 SESSION STARTED: ${data.family_id} (Age: ${childAge}, Focus: ${conversationFocus})`]);
         setSessionStartTime(new Date());
         setFamilyIdInput("");
-        refreshSessionStatus();
+        
+        // Immediately update session info with the configuration we just sent
+        setSessionInfo({
+          active: true,
+          session_id: data.session_id,
+          family_id: data.family_id,
+          child_age: childAge,
+          conversation_focus: conversationFocus,
+          custom_message: customMessage.trim(),
+          message_count: 0,
+          start_time: new Date().toISOString()
+        });
+        
+        // Also refresh from backend to ensure sync
+        setTimeout(() => refreshSessionStatus(), 500);
       } else {
         setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to start session: ${data.message}`]);
       }
@@ -174,6 +200,52 @@ const WizardPage = () => {
     }
   };
 
+  // NEW: Update session configuration mid-session
+  const updateSessionConfig = async () => {
+    if (!sessionInfo.active) return;
+    
+    setIsUpdatingConfig(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/session/update-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          child_age: childAge,
+          conversation_focus: conversationFocus,
+          custom_message: customMessage.trim()
+        })
+      });
+      
+      const data = await response.json();
+      if (data.status === 'success') {
+        // Log the configuration change
+        const changes = [];
+        if (sessionInfo.child_age !== childAge) changes.push(`Age ${sessionInfo.child_age}→${childAge}`);
+        if (sessionInfo.conversation_focus !== conversationFocus) changes.push(`Focus ${sessionInfo.conversation_focus}→${conversationFocus}`);
+        if (sessionInfo.custom_message !== customMessage.trim()) changes.push(`Notes updated`);
+        
+        setLog(prev => [...prev, `[${getTimestamp()}] 🔧 CONFIG UPDATED: ${changes.join(', ')}`]);
+        
+        // Update local session info immediately
+        setSessionInfo(prev => ({
+          ...prev,
+          child_age: childAge,
+          conversation_focus: conversationFocus,
+          custom_message: customMessage.trim()
+        }));
+        
+        // Refresh from backend to ensure sync
+        setTimeout(() => refreshSessionStatus(), 300);
+      } else {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to update config: ${data.message}`]);
+      }
+    } catch (error) {
+      setLog(prev => [...prev, `[${getTimestamp()}] ❌ Error updating config: ${error.message}`]);
+    } finally {
+      setIsUpdatingConfig(false);
+    }
+  };
+
   // NEW: Calculate session duration
   const getSessionDuration = () => {
     if (!sessionStartTime) return "--";
@@ -181,12 +253,46 @@ const WizardPage = () => {
     return `${duration} min`;
   };
 
-  // NEW: Auto-refresh session status
+  // NEW: Focus area options
+  const focusAreas = [
+    'Open-ended',
+    'Literacy and Communication', 
+    'STEM',
+    'Creativity',
+    'Emotional Intelligence',
+    'Physical Development',
+    'Social Skills',
+    'History'
+  ];
+
+  // NEW: Focus area descriptions for UI
+  const focusDescriptions = {
+    'Open-ended': 'Mix of age-appropriate topics',
+    'Literacy and Communication': 'Words, letters, reading, writing, expressing ideas',
+    'STEM': 'Counting, how things work, building, scientific thinking',
+    'Creativity': 'Imagination, art, creative expression, design thinking',
+    'Emotional Intelligence': 'Feelings, emotions, character emotions',
+    'Physical Development': 'Movement, coordination, sports, healthy habits',
+    'Social Skills': 'Friendship, cooperation, sharing, community relationships',
+    'History': 'Historical facts and knowledge'
+  };
+
+  // NEW: Auto-refresh session status and sync config
   useEffect(() => {
     refreshSessionStatus();
     const interval = setInterval(refreshSessionStatus, 10000); // Every 10 seconds
     return () => clearInterval(interval);
   }, []);
+
+  // NEW: Sync local config state with session info when it changes
+  useEffect(() => {
+    if (sessionInfo.active) {
+      // Only update local state if session has config data
+      if (sessionInfo.child_age !== undefined) setChildAge(sessionInfo.child_age);
+      if (sessionInfo.conversation_focus) setConversationFocus(sessionInfo.conversation_focus);
+      if (sessionInfo.custom_message !== undefined) setCustomMessage(sessionInfo.custom_message || '');
+    }
+  }, [sessionInfo]);
 
   const autoSendResponse = (responseText) => {
     const currentAutomation = automationRef.current;
@@ -468,7 +574,7 @@ const WizardPage = () => {
             {/* NEW: Session status in navbar */}
             {sessionInfo.active && (
               <span className="badge bg-success ms-2" style={{ fontSize: '0.8rem', borderRadius: '6px' }}>
-                {sessionInfo.family_id} • {getSessionDuration()} • {sessionInfo.message_count} msgs
+                {sessionInfo.family_id} • Age {sessionInfo.child_age || childAge} • {conversationFocus} • {getSessionDuration()} • {sessionInfo.message_count} msgs
               </span>
             )}
             {automationEnabled && (
@@ -539,12 +645,108 @@ const WizardPage = () => {
                 {sessionInfo.active ? '🟢 ACTIVE SESSION' : '🔴 NO ACTIVE SESSION'}
               </div>
               
+              {/* NEW: Configuration Section - now available during both active and inactive sessions */}
+              <div className="mb-3">
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <h6 className="mb-0" style={{ fontSize: '0.9rem', fontWeight: '600' }}>
+                    ⚙️ {sessionInfo.active ? 'Update Configuration' : 'Configuration'}
+                  </h6>
+                  <button
+                    className="btn btn-clean btn-outline-secondary btn-sm"
+                    onClick={() => setShowConfig(!showConfig)}
+                    style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+                  >
+                    {showConfig ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                
+                {showConfig && (
+                  <div className="border rounded p-2" style={{ fontSize: '0.8rem' }}>
+                    {/* Child Age */}
+                    <div className="mb-2">
+                      <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
+                        Child Age: <span className="badge bg-primary">{childAge}</span>
+                      </label>
+                      <input
+                        type="range"
+                        className="form-range"
+                        min="1"
+                        max="15"
+                        value={childAge}
+                        onChange={(e) => setChildAge(parseInt(e.target.value))}
+                        style={{ height: '20px' }}
+                        disabled={isUpdatingConfig}
+                      />
+                      <div className="d-flex justify-content-between" style={{ fontSize: '0.65rem', color: '#666' }}>
+                        <span>1 year</span>
+                        <span>15 years</span>
+                      </div>
+                    </div>
+                    
+                    {/* Conversation Focus */}
+                    <div className="mb-2">
+                      <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
+                        Conversation Focus:
+                      </label>
+                      <select
+                        className="form-select form-select-sm"
+                        value={conversationFocus}
+                        onChange={(e) => setConversationFocus(e.target.value)}
+                        style={{ fontSize: '0.75rem' }}
+                        disabled={isUpdatingConfig}
+                      >
+                        {focusAreas.map(area => (
+                          <option key={area} value={area}>{area}</option>
+                        ))}
+                      </select>
+                      <div className="text-muted mt-1" style={{ fontSize: '0.65rem', lineHeight: '1.2' }}>
+                        {focusDescriptions[conversationFocus]}
+                      </div>
+                    </div>
+                    
+                    {/* Custom Message */}
+                    <div className="mb-2">
+                      <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
+                        Custom Notes (optional):
+                      </label>
+                      <textarea
+                        className="form-control form-control-sm"
+                        placeholder="Add family-specific context..."
+                        value={customMessage}
+                        onChange={(e) => setCustomMessage(e.target.value)}
+                        rows={2}
+                        style={{ fontSize: '0.7rem' }}
+                        disabled={isUpdatingConfig}
+                      />
+                    </div>
+                    
+                    {/* Action Button */}
+                    {sessionInfo.active ? (
+                      <button
+                        className="btn btn-clean btn-warning btn-sm w-100"
+                        onClick={updateSessionConfig}
+                        disabled={isUpdatingConfig}
+                        style={{ fontSize: '0.75rem' }}
+                      >
+                        {isUpdatingConfig ? '🔧 Updating...' : '🔧 Update Configuration'}
+                      </button>
+                    ) : (
+                      <div className="text-muted text-center" style={{ fontSize: '0.7rem', padding: '8px' }}>
+                        Start session to apply configuration
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              
               {sessionInfo.active ? (
                 <div>
                   <div className="mb-2" style={{ fontSize: '0.85rem' }}>
                     <strong>Family:</strong> {sessionInfo.family_id}<br/>
                     <strong>Duration:</strong> {getSessionDuration()}<br/>
-                    <strong>Messages:</strong> {sessionInfo.message_count}
+                    <strong>Messages:</strong> {sessionInfo.message_count}<br/>
+                    <strong>Age:</strong> {sessionInfo.child_age || childAge}<br/>
+                    <strong>Focus:</strong> {sessionInfo.conversation_focus || conversationFocus}
                   </div>
                   <div className="d-flex gap-2">
                     <button
