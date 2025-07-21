@@ -74,19 +74,30 @@ export default function MediaList({
 
   return (
     <div className="mt-4">
-      <h4>📁 Uploaded Media</h4>
+      <h4 style={{ 
+        marginBottom: "1rem", 
+        color: "#333",
+        fontWeight: "600"
+      }}>
+        📁 Uploaded Media
+      </h4>
 
-      {/* ✅ Scrollable wrapper */}
+      {/* Improved scrollable wrapper */}
       <div
         style={{
-          maxHeight: "400px",
-          overflowY: "auto",
-          paddingRight: "1rem",
-          border: "1px solid #ccc",
-          borderRadius: "8px",
+          maxHeight: files.length > 9 ? "600px" : "none",
+          overflowY: files.length > 9 ? "auto" : "visible",
+          padding: "1.5rem",
+          border: "1px solid #e0e0e0",
+          borderRadius: "12px",
+          backgroundColor: "#fafafa",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.05)"
         }}
       >
-        <div className="d-flex flex-wrap gap-4 p-3">
+        <div className="d-flex flex-wrap gap-4" style={{ 
+          justifyContent: "center",
+          alignItems: "flex-start"
+        }}>
           {files.map((file, idx) => {
             // Get the actual filename to work with
             const filename = getFilename(file);
@@ -102,45 +113,59 @@ export default function MediaList({
                 key={idx}
                 style={{
                   textAlign: "center",
-                  maxWidth: "200px",
-                  flex: "0 0 auto",
+                  width: "300px",
                   cursor: "pointer",
-                  justifyContent: "flex-start",
-                  alignItems: "center",
-                  height: "260px", // Increased to accommodate source badge
                   display: "flex",
                   flexDirection: "column",
+                  backgroundColor: "white",
+                  borderRadius: "8px",
+                  padding: "0.75rem",
+                  border: "1px solid #e5e5e5",
+                  transition: "all 0.2s ease",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.1)"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.1)";
                 }}
               >
-                {/* Filename and source badge shown above image */}
-                <div style={{ marginBottom: "6px", width: "100%" }}>
+                {/* Filename and source badge */}
+                <div style={{ marginBottom: "8px", width: "100%" }}>
                   <div
                     style={{
-                      fontSize: "0.75rem",
-                      fontWeight: 500,
+                      fontSize: "0.85rem",
+                      fontWeight: "600",
                       color: "#333",
-                      marginBottom: "4px",
-                      maxWidth: "100%",
+                      marginBottom: "6px",
+                      lineHeight: "1.3",
+                      height: "2.6em",
                       overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      wordBreak: "break-word"
                     }}
-                    title={filename} // show full filename on hover
+                    title={filename}
                   >
                     {displayName}
                   </div>
                   
                   {/* Source badge */}
                   {source && (
-                    <div style={{ marginBottom: "4px" }}>
+                    <div style={{ marginBottom: "6px" }}>
                       <span
                         style={{
-                          background: source === "temi" ? "#4CAF50" : "#2196F3",
+                          background: source === "temi" ? "linear-gradient(135deg, #4CAF50, #45a049)" : "linear-gradient(135deg, #2196F3, #1976D2)",
                           color: "white",
-                          padding: "2px 8px",
-                          fontSize: "0.65rem",
-                          borderRadius: "12px",
-                          fontWeight: "500"
+                          padding: "4px 10px",
+                          fontSize: "0.7rem",
+                          borderRadius: "16px",
+                          fontWeight: "500",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
                         }}
                       >
                         {source === "temi" ? "📱 Temi Robot" : "🧙‍♂️ Wizard Dashboard"}
@@ -150,7 +175,13 @@ export default function MediaList({
                 </div>
 
                 <div
-                  style={{ position: "relative", display: "inline-block" }}
+                  style={{ 
+                    position: "relative", 
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    flex: 1
+                  }}
                   onMouseEnter={() => setHoveredImage(filename)}
                   onMouseLeave={() => setHoveredImage(null)}
                 >
@@ -160,9 +191,11 @@ export default function MediaList({
                       alt={displayName}
                       style={{
                         maxWidth: "100%",
-                        maxHeight: "180px", // Reduced to accommodate badges
-                        border: displayedMedia === filename ? "5px solid #0d6efd" : "1px solid #ddd",
-                        borderRadius: "4px"
+                        maxHeight: "220px",
+                        border: displayedMedia === filename ? "3px solid #0d6efd" : "1px solid #ddd",
+                        borderRadius: "6px",
+                        objectFit: "cover",
+                        boxShadow: displayedMedia === filename ? "0 0 0 2px rgba(13, 110, 253, 0.25)" : "none"
                       }}
                       onClick={() => handleClickWithConfirm(filename)}
                     />
@@ -174,9 +207,10 @@ export default function MediaList({
                       controls
                       style={{
                         maxWidth: "100%",
-                        maxHeight: "180px", // Reduced to accommodate badges
-                        border: displayedMedia === filename ? "5px solid #0d6efd" : "1px solid #ddd",
-                        borderRadius: "4px"
+                        maxHeight: "220px",
+                        border: displayedMedia === filename ? "3px solid #0d6efd" : "1px solid #ddd",
+                        borderRadius: "6px",
+                        boxShadow: displayedMedia === filename ? "0 0 0 2px rgba(13, 110, 253, 0.25)" : "none"
                       }}
                       onClick={() => handleClickWithConfirm(filename)}
                     />
@@ -188,19 +222,26 @@ export default function MediaList({
                         position: "absolute",
                         top: "8px",
                         right: "8px",
-                        backgroundColor: "rgba(255, 255, 255, 0.95)",
-                        border: "1px solid #ccc",
-                        borderRadius: "6px",
-                        padding: "6px",
+                        backgroundColor: "rgba(255, 255, 255, 0.98)",
+                        border: "1px solid #ddd",
+                        borderRadius: "8px",
+                        padding: "8px",
                         display: "flex",
                         flexDirection: "column",
                         gap: "6px",
                         zIndex: 10,
                         width: "140px",
+                        boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+                        backdropFilter: "blur(4px)"
                       }}
                     >
                       <button
                         className="btn btn-sm btn-outline-primary w-100"
+                        style={{ 
+                          fontSize: "0.75rem",
+                          padding: "4px 8px",
+                          borderRadius: "4px"
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleSendToLLM(filename, "conversation");
@@ -211,6 +252,11 @@ export default function MediaList({
 
                       <button
                         className="btn btn-sm btn-outline-secondary w-100"
+                        style={{ 
+                          fontSize: "0.75rem",
+                          padding: "4px 8px",
+                          borderRadius: "4px"
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleSendToLLM(filename, "suggestion");
@@ -221,6 +267,11 @@ export default function MediaList({
 
                       <button
                         className="btn btn-sm btn-outline-success w-100"
+                        style={{ 
+                          fontSize: "0.75rem",
+                          padding: "4px 8px",
+                          borderRadius: "4px"
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
                           goToLocation(filename);

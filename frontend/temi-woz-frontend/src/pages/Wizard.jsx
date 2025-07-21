@@ -23,9 +23,8 @@ const WizardPage = () => {
 
   const wsRef = useRef(null);
   const logEndRef = useRef(null);
-  const automationRef = useRef(automationEnabled); // 🎯 Keep current automation state
+  const automationRef = useRef(automationEnabled);
 
-  // 🎯 Update ref when automation state changes
   useEffect(() => {
     automationRef.current = automationEnabled;
   }, [automationEnabled]);
@@ -38,19 +37,16 @@ const WizardPage = () => {
     });
   };
 
-  // Auto-scroll log to bottom when new messages arrive
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [log]);
 
-  // Debug automation state changes (keep minimal logging)
   useEffect(() => {
     console.log("Automation state changed to:", automationEnabled);
   }, [automationEnabled]);
 
-  // 🎯 FIXED: Auto-send function with proper state checking
   const autoSendResponse = (responseText) => {
-    const currentAutomation = automationRef.current; // Use ref for current state
+    const currentAutomation = automationRef.current;
     console.log("🔥 autoSendResponse called with:", responseText);
     console.log("🔥 Current automation state (ref):", currentAutomation);
     
@@ -58,12 +54,10 @@ const WizardPage = () => {
       setLog((prev) => [...prev, `[${getTimestamp()}] ⏰ AUTO-SEND starting 3-second countdown...`]);
       setAutoSendCountdown(3);
       
-      // Clear any existing timers
       if (window.autoSendTimers) {
         window.autoSendTimers.forEach(timer => clearTimeout(timer));
       }
       
-      // Create new countdown timers
       const timer1 = setTimeout(() => {
         console.log("🔥 Countdown: 2 seconds left");
         setAutoSendCountdown(2);
@@ -82,7 +76,6 @@ const WizardPage = () => {
         setInputText("");
       }, 3000);
       
-      // Store timers for cleanup
       window.autoSendTimers = [timer1, timer2, timer3];
     } else {
       console.log("🔥 Auto-send skipped - automation disabled or empty text");
@@ -154,18 +147,16 @@ const WizardPage = () => {
       setLog((prev) => [...prev, `[${getTimestamp()}] AI Response: ${responseText}`]);
       setInputText(responseText);
       
-      // 🎯 FIX: Use current automation state directly
       console.log("🔥 Suggested response received! Automation enabled:", automationEnabled);
-      autoSendResponse(responseText); // Call autoSendResponse every time, let it check automation internally
+      autoSendResponse(responseText);
         
     } else if (data.type === 'wizard_response') {
       const responseText = data.data.text;
       setLog((prev) => [...prev, `[${getTimestamp()}] AI Response (Image): ${responseText}`]);
       setInputText(responseText);
       
-      // 🎯 FIX: Use current automation state directly
       console.log("🔥 Wizard response received! Automation enabled:", automationEnabled);
-      autoSendResponse(responseText); // Call autoSendResponse every time, let it check automation internally
+      autoSendResponse(responseText);
         
     } else if (data.type === 'media_uploaded') {
       const { filename, source } = data;
@@ -239,10 +230,13 @@ const WizardPage = () => {
   }
 
   return (
-    <div className="container-fluid p-0" style={{ height: '100vh', overflow: 'hidden' }}>
+    <div className="container-fluid p-0" style={{ 
+      height: '100vh', 
+      overflow: 'hidden',
+      backgroundColor: '#f8f9fa'
+    }}>
       <style>
         {`
-          /* 🎯 Force MediaList to use full height */
           .media-list-container {
             height: 100% !important;
             min-height: 500px !important;
@@ -252,31 +246,76 @@ const WizardPage = () => {
             height: 100% !important;
           }
           
-          /* Make image grids expand vertically */
           .media-grid, .uploaded-media {
             height: 100% !important;
             display: flex !important;
             flex-direction: column !important;
           }
+
+          .btn-clean {
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            border: 1px solid;
+          }
+
+          .btn-clean:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+          }
+
+          .card-clean {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+          }
+
+          .form-control-clean {
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+          }
+
+          .form-control-clean:focus {
+            border-color: #0d6efd;
+            box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
+          }
+
+          .log-area {
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+          }
+
+          .navbar-clean {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+          }
+
+          .control-panel {
+            background-color: #ffffff;
+            border-top: 1px solid #dee2e6;
+            box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
+          }
         `}
       </style>
-      <nav className="navbar navbar-dark bg-dark fixed-top shadow-sm">
+
+      <nav className="navbar navbar-dark bg-dark navbar-clean fixed-top">
         <div className="d-flex justify-content-between align-items-center w-100 px-3">
-          <span className="navbar-brand mb-0 h1" style={{ fontSize: '1.1rem' }}>
+          <span className="navbar-brand mb-0 h1" style={{ fontSize: '1.1rem', fontWeight: '600' }}>
             🤖 Wizard Control Dashboard
             {automationEnabled && (
-              <span className="badge bg-success ms-2" style={{ fontSize: '0.9rem' }}>
+              <span className="badge bg-success ms-2" style={{ fontSize: '0.9rem', borderRadius: '6px' }}>
                 {autoSendCountdown > 0 ? `AUTO ${autoSendCountdown}s` : 'AUTO ON'}
               </span>
             )}
             {autoSendCountdown > 0 && !automationEnabled && (
-              <span className="badge bg-warning ms-2" style={{ fontSize: '0.9rem' }}>
+              <span className="badge bg-warning ms-2" style={{ fontSize: '0.9rem', borderRadius: '6px' }}>
                 COUNTDOWN {autoSendCountdown}s
               </span>
             )}
           </span>
           <button
-            className="btn btn-outline-light btn-sm"
+            className="btn btn-clean btn-outline-light btn-sm"
             onClick={() => setShowControls(!showControls)}
           >
             {showControls ? "Hide Controls" : "Show Controls"}
@@ -286,9 +325,14 @@ const WizardPage = () => {
 
       {uploadNotification && (
         <div
-          className="alert alert-success position-fixed bottom-0 start-50 translate-middle-x mb-3 shadow"
+          className="alert alert-success position-fixed bottom-0 start-50 translate-middle-x mb-3"
           role="alert"
-          style={{ zIndex: 1050 }}
+          style={{ 
+            zIndex: 1050, 
+            borderRadius: '10px', 
+            border: 'none',
+            boxShadow: '0 4px 12px rgba(40, 167, 69, 0.3)'
+          }}
         >
           {uploadNotification}
         </div>
@@ -300,19 +344,19 @@ const WizardPage = () => {
           marginTop: '70px', 
           height: 'calc(100vh - 70px)',
           paddingBottom: showControls ? '200px' : '20px',
-          transition: 'padding-bottom 0.3s ease'
+          transition: 'padding-bottom 0.3s ease',
+          padding: '0 15px'
         }}
       >
         <div className="row h-100">
-          {/* Left Panel - Control Panel */}
           <div className="col-md-6 h-100 d-flex flex-column pe-3">
-            <div className="card shadow-sm h-100 d-flex flex-column">
-              <div className="card-header bg-primary text-white">
-                <h5 className="mb-0">Message Log & Control</h5>
+            <div className="card card-clean shadow-sm h-100 d-flex flex-column">
+              <div className="card-header bg-primary text-white" style={{ borderRadius: '12px 12px 0 0' }}>
+                <h5 className="mb-0" style={{ fontWeight: '600', fontSize: '1.3rem'}}>Message Log & Control</h5>
               </div>
               <div className="card-body d-flex flex-column p-3" style={{ minHeight: 0, overflow: 'hidden' }}>
                 <div
-                  className="border rounded bg-light p-3 mb-3 position-relative flex-grow-1"
+                  className="log-area p-3 mb-3 position-relative flex-grow-1"
                   style={{ 
                     overflowY: "auto", 
                     fontSize: "0.95rem",
@@ -337,7 +381,7 @@ const WizardPage = () => {
                 <div className="mt-auto">
                   <div className="d-flex gap-2 mb-2">
                     <button
-                      className="btn btn-outline-secondary btn-sm flex-fill"
+                      className="btn btn-clean btn-outline-secondary btn-sm flex-fill"
                       onClick={() => {
                         const blob = new Blob([log.join("\n")], {
                           type: "text/plain;charset=utf-8",
@@ -354,7 +398,7 @@ const WizardPage = () => {
                     </button>
 
                     <button
-                      className="btn btn-outline-info btn-sm flex-fill"
+                      className="btn btn-clean btn-outline-info btn-sm flex-fill"
                       onClick={() => {
                         if (window.confirm("Clear and refresh the message log?")) {
                           setLog([]);
@@ -367,7 +411,7 @@ const WizardPage = () => {
 
                   <div className="mb-2">
                     <select
-                      className="form-select"
+                      className="form-select form-control-clean"
                       onChange={(e) => setInputText(e.target.value)}
                       value=""
                       style={{ fontSize: '0.95rem' }}
@@ -391,6 +435,7 @@ const WizardPage = () => {
                         borderLeft: "4px solid #0d6efd",
                         backgroundColor: "#f8f9fa",
                         margin: "0 0 8px 0",
+                        borderRadius: '8px'
                       }}
                     >
                       📸 <strong>Topic:</strong> {activeMediaContext.filename} ({activeMediaContext.mode})
@@ -403,7 +448,8 @@ const WizardPage = () => {
                            backgroundColor: '#fff3cd',
                            borderWidth: '2px',
                            fontSize: '1.1rem',
-                           fontWeight: 'bold'
+                           fontWeight: 'bold',
+                           borderRadius: '10px'
                          }}>
                       ⏰ AUTO-SENDING IN {autoSendCountdown} SECONDS...
                       <div className="small mt-1">Click "Speak" to cancel auto-send</div>
@@ -412,7 +458,7 @@ const WizardPage = () => {
                   <div className="input-group">
                     <textarea
                       rows={3}
-                      className="form-control"
+                      className="form-control form-control-clean"
                       placeholder="Enter text for robot to speak..."
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
@@ -424,7 +470,7 @@ const WizardPage = () => {
                     />
                     <div className="d-flex flex-column gap-2 ms-2">
                       <button
-                        className="btn btn-primary btn-lg"
+                        className="btn btn-clean btn-primary btn-lg"
                         disabled={!inputText.trim()}
                         onClick={() => {
                           const text = inputText.trim();
@@ -445,7 +491,7 @@ const WizardPage = () => {
                         🔊 Speak
                       </button>
                       <button
-                        className={`btn btn-lg ${automationEnabled ? 'btn-danger' : 'btn-success'}`}
+                        className={`btn btn-clean btn-lg ${automationEnabled ? 'btn-danger' : 'btn-success'}`}
                         onClick={() => {
                           setAutomationEnabled(enabled => {
                             const next = !enabled;
@@ -476,17 +522,16 @@ const WizardPage = () => {
             </div>
           </div>
 
-          {/* Right Panel - Media Library */}
           <div className="col-md-6 h-100 ps-3">
-            <div className="card shadow-sm h-100 d-flex flex-column">
-              <div className="card-header bg-success text-white">
-                <h5 className="mb-0">📁 Media Library</h5>
+            <div className="card card-clean shadow-sm h-100 d-flex flex-column">
+              <div className="card-header bg-success text-white" style={{ borderRadius: '12px 12px 0 0' }}>
+                <h5 className="mb-0" style={{ fontWeight: '600', fontSize: '1.3rem' }}>📁 Media Library</h5>
               </div>
               <div 
                 className="card-body p-1 d-flex flex-column" 
                 style={{ 
                   minHeight: 0,
-                  height: 'calc(100vh - 200px)', // 🎯 Force specific height
+                  height: 'calc(100vh - 200px)',
                   overflow: 'hidden'
                 }}
               >
@@ -506,7 +551,7 @@ const WizardPage = () => {
                     displayedMedia={displayedMedia}
                     handleSendToLLM={handleSendToLLM}
                     temiFiles={temiFiles}
-                    className="h-100" // 🎯 Add height class
+                    className="h-100"
                   />
                 </div>
               </div>
@@ -515,9 +560,8 @@ const WizardPage = () => {
         </div>
       </div>
 
-      {/* Bottom Controls Panel - Collapsible */}
       <div 
-        className={`position-fixed bottom-0 start-0 end-0 bg-white shadow-lg border-top transition-all ${
+        className={`position-fixed bottom-0 start-0 end-0 control-panel ${
           showControls ? 'translate-y-0' : 'translate-y-100'
         }`}
         style={{ 
@@ -531,13 +575,13 @@ const WizardPage = () => {
         <div className="container-fluid py-3">
           <div className="row g-2">
             <div className="col-md-4">
-              <h6 className="text-muted mb-2" style={{ fontSize: '0.85rem' }}>🧭 Navigation</h6>
+              <h6 className="text-muted mb-2" style={{ fontSize: '0.85rem', fontWeight: '600' }}>🧭 Navigation</h6>
               <div className="d-flex flex-wrap gap-1 mb-2">
                 {savedLocations.map((loc) => (
                   <button
                     key={loc}
                     onClick={() => sendGoTo(loc)}
-                    className="btn btn-outline-primary btn-sm"
+                    className="btn btn-clean btn-outline-primary btn-sm"
                     style={{ fontSize: '0.8rem', padding: '4px 8px' }}
                   >
                     📍 {loc}
@@ -545,7 +589,7 @@ const WizardPage = () => {
                 ))}
                 {savedLocations.length === 0 && (
                   <button
-                    className="btn btn-outline-warning btn-sm"
+                    className="btn btn-clean btn-outline-warning btn-sm"
                     onClick={() =>
                       sendMessage({ command: "queryLocations", payload: "" })
                     }
@@ -558,11 +602,11 @@ const WizardPage = () => {
             </div>
 
             <div className="col-md-4">
-              <h6 className="text-muted mb-2" style={{ fontSize: '0.85rem' }}>🎮 Movement</h6>
+              <h6 className="text-muted mb-2" style={{ fontSize: '0.85rem', fontWeight: '600' }}>🎮 Movement</h6>
               <div className="row g-1">
                 <div className="col-3">
                   <button
-                    className={`btn btn-sm w-100 ${
+                    className={`btn btn-clean btn-sm w-100 ${
                       pressedButtons.includes(14) ? "btn-success" : "btn-outline-primary"
                     }`}
                     onClick={() => sendMessage({ command: "turnBy", payload: "10" })}
@@ -573,7 +617,7 @@ const WizardPage = () => {
                 </div>
                 <div className="col-3">
                   <button
-                    className={`btn btn-sm w-100 ${
+                    className={`btn btn-clean btn-sm w-100 ${
                       pressedButtons.includes(12) ? "btn-success" : "btn-outline-primary"
                     }`}
                     onClick={() => sendMessage({ command: "skidJoy", payload: "(0.5, 0)" })}
@@ -584,7 +628,7 @@ const WizardPage = () => {
                 </div>
                 <div className="col-3">
                   <button
-                    className={`btn btn-sm w-100 ${
+                    className={`btn btn-clean btn-sm w-100 ${
                       pressedButtons.includes(13) ? "btn-success" : "btn-outline-primary"
                     }`}
                     onClick={() => sendMessage({ command: "skidJoy", payload: "(-0.5, 0)" })}
@@ -595,7 +639,7 @@ const WizardPage = () => {
                 </div>
                 <div className="col-3">
                   <button
-                    className={`btn btn-sm w-100 ${
+                    className={`btn btn-clean btn-sm w-100 ${
                       pressedButtons.includes(15) ? "btn-success" : "btn-outline-primary"
                     }`}
                     onClick={() => sendMessage({ command: "turnBy", payload: "-10" })}
@@ -608,7 +652,7 @@ const WizardPage = () => {
               <div className="row g-1 mt-1">
                 <div className="col-3">
                   <button
-                    className="btn btn-outline-primary btn-sm w-100"
+                    className="btn btn-clean btn-outline-primary btn-sm w-100"
                     onClick={() => sendMessage({ command: "tiltBy", payload: "5" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
@@ -617,7 +661,7 @@ const WizardPage = () => {
                 </div>
                 <div className="col-3">
                   <button
-                    className="btn btn-outline-primary btn-sm w-100"
+                    className="btn btn-clean btn-outline-primary btn-sm w-100"
                     onClick={() => sendMessage({ command: "tiltBy", payload: "-5" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
@@ -626,7 +670,7 @@ const WizardPage = () => {
                 </div>
                 <div className="col-3">
                   <button
-                    className="btn btn-outline-primary btn-sm w-100"
+                    className="btn btn-clean btn-outline-primary btn-sm w-100"
                     onClick={() => sendMessage({ command: "tiltAngle", payload: "0" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
@@ -635,7 +679,7 @@ const WizardPage = () => {
                 </div>
                 <div className="col-3">
                   <button
-                    className="btn btn-danger btn-sm w-100"
+                    className="btn btn-clean btn-danger btn-sm w-100"
                     onClick={() => sendMessage({ command: "stopMovement", payload: "" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
@@ -646,11 +690,11 @@ const WizardPage = () => {
             </div>
 
             <div className="col-md-4">
-              <h6 className="text-muted mb-2" style={{ fontSize: '0.85rem' }}>📱 Screen & Media</h6>
+              <h6 className="text-muted mb-2" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📱 Screen & Media</h6>
               <div className="row g-1">
                 <div className="col-6">
                   <button
-                    className="btn btn-outline-primary btn-sm w-100"
+                    className="btn btn-clean btn-outline-primary btn-sm w-100"
                     onClick={() => sendMessage({ command: "navigateCamera", payload: "" })}
                     style={{ fontSize: '0.8rem', padding: '6px 8px' }}
                   >
@@ -659,7 +703,7 @@ const WizardPage = () => {
                 </div>
                 <div className="col-6">
                   <button
-                    className="btn btn-outline-primary btn-sm w-100"
+                    className="btn btn-clean btn-outline-primary btn-sm w-100"
                     onClick={() => sendMessage({ command: "displayFace", payload: "" })}
                     style={{ fontSize: '0.8rem', padding: '6px 8px' }}
                   >
@@ -670,7 +714,7 @@ const WizardPage = () => {
               <div className="row g-1 mt-1">
                 <div className="col-4">
                   <button
-                    className="btn btn-outline-success btn-sm w-100"
+                    className="btn btn-clean btn-outline-success btn-sm w-100"
                     disabled={isRecording}
                     onClick={() => {
                       const customName = window.prompt("Enter a name for the picture:");
@@ -683,7 +727,7 @@ const WizardPage = () => {
                 </div>
                 <div className="col-4">
                   <button
-                    className="btn btn-outline-danger btn-sm w-100"
+                    className="btn btn-clean btn-outline-danger btn-sm w-100"
                     disabled={isRecording}
                     onClick={() => {
                       sendMessage({ command: "startVideo", payload: "" });
@@ -696,7 +740,7 @@ const WizardPage = () => {
                 </div>
                 <div className="col-4">
                   <button
-                    className="btn btn-danger btn-sm w-100"
+                    className="btn btn-clean btn-danger btn-sm w-100"
                     disabled={!isRecording}
                     onClick={() => {
                       sendMessage({ command: "stopVideo", payload: "" });
