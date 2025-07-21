@@ -4,22 +4,14 @@ import os
 from websockets.asyncio.server import serve
 from fastapi import WebSocketDisconnect
 import signal
-from llm_model import generate_response
+from llm_model import generate_response_with_session, start_new_session, end_current_session, get_current_session_messages
 
 
 PATH_TEMI = '/temi'
 PATH_CONTROL = '/control'
 PATH_PARTICIPANT = '/participant'
 LOG_FILE = 'participant_data/log.log'
-MESSAGES_FILE = 'participant_data/messages.json'
-
-
-try:
-    with open(MESSAGES_FILE, 'r') as f:
-        MESSAGES = json.load(f)
-except Exception as e:
-    print('[ERROR] No messages file. Set to empty')
-    MESSAGES = []
+MESSAGES_FILE = 'participant_data/messages.json'  # Legacy file - kept for backward compatibility
 
 
 def log_event(event):
@@ -40,26 +32,30 @@ class WebSocketServer:
         }
         self.behavior_mode = None
         self.last_displayed = None
-        self.messages = self._load_messages()
         self.latest_image = None
-        self.image_question_mode = False  # Track if user is asking questions about an image
-
-    def _load_messages(self):
-        try:
-            with open(MESSAGES_FILE, 'r') as f:
-                return json.load(f)
-        except Exception:
-            print('[ERROR] No messages file. Set to empty')
-            return []
+        self.image_question_mode = False
+        # Remove self.messages - now handled by session management
+        
+    @property
+    def messages(self):
+        """Get current session messages (for backward compatibility)."""
+        return get_current_session_messages()
 
     def save_messages(self):
-        with open(MESSAGES_FILE, 'w') as f:
-            json.dump(self.messages, f, indent=4)
+        """Save messages - now handled automatically by session management."""
+        # This is now handled automatically by the session management system
+        # Keeping this method for backward compatibility
+        pass
 
     def set_latest_image(self, image_path: str):
         """Set the latest image path."""
         self.latest_image = image_path
         print(f'[INFO] Latest image set: {image_path}')
+
+    def reset_latest_image(self):
+        """Reset the latest image path."""
+        self.latest_image = None
+        print('[INFO] Latest image reset to None')
 
     def activate_image_question_mode(self):
         """Activate image question mode - next user queries will include the current image."""
@@ -69,7 +65,17 @@ class WebSocketServer:
     def deactivate_image_question_mode(self):
         """Deactivate image question mode."""
         self.image_question_mode = False
-        print('[INFO] Image question mode deactivated')
+        self.reset_latest_image()
+        print('[INFO] Image question mode deactivated, latest image reset')
+
+    async def broadcast_to_all(self, message):
+        """Broadcast message to all connected clients."""
+        for group in self.connections.values():
+            for connection in group:
+                try:
+                    await connection.send_json(message)
+                except:
+                    pass  # Connection might be closed
 
     async def handle_connection(self, websocket, ws_path):
         self.connections[ws_path].add(websocket)
@@ -86,7 +92,6 @@ class WebSocketServer:
                 elif ws_path == PATH_PARTICIPANT:
                     await self.participant_handler(websocket, message)
                 else:
-                    # No handler for this path; close the connection.
                     return
         except WebSocketDisconnect:
             print(f"[{ws_path}] Disconnected")
@@ -96,7 +101,6 @@ class WebSocketServer:
             print(self.connections)
 
     async def send_message(self, group, message):
-        # we really just expect one to be in the set
         print(f'Sending message to {group}: {message}')
         for connection in self.connections[group]:
             await connection.send_json(message)
@@ -110,16 +114,46 @@ class WebSocketServer:
         if 'command' not in msg_json:
             return
             
-        if msg_json['command'] == 'speak':
-            self.messages.append({
-                'role': 'assistant',
-                'content': msg_json['payload']
-            })
-            self.save_messages()
+        # SESSION MANAGEMENT COMMANDS
+        if msg_json['command'] == 'start_family_session':
+            family_id = msg_json.get('payload', {}).get('family_id', f"family_{len(os.listdir('sessions')) + 1}")
+            session_id = start_new_session(family_id)
+            
+            response = {
+                'type': 'session_started',
+                'data': {
+                    'session_id': session_id,
+                    'family_id': family_id,
+                    'message': f'Started new session for {family_id}'
+                }
+            }
+            await self.send_message(PATH_CONTROL, response)
+            
+        elif msg_json['command'] == 'end_family_session':
+            filepath = end_current_session()
+            
+            response = {
+                'type': 'session_ended',
+                'data': {
+                    'filepath': filepath,
+                    'message': 'Session ended and saved'
+                }
+            }
+            await self.send_message(PATH_CONTROL, response)
+            
+        # EXISTING COMMANDS (updated to use session management)
+        elif msg_json['command'] == 'speak':
+            # Add assistant message to current session
+            response_text = msg_json['payload']
+            
+            # This will automatically add to current session
+            from llm_model import current_session
+            if current_session:
+                current_session.add_message('assistant', response_text)
+            
             await self.send_message(PATH_TEMI, msg_json)
 
         elif msg_json['command'] == 'generate_response':
-            # Handle manual generate response request
             payload = msg_json.get('payload', {})
             with_image = payload.get('with_image', False)
             
@@ -128,7 +162,12 @@ class WebSocketServer:
                 img_path = self.latest_image
                 print(f'[INFO] Using image for response generation: {img_path}')
             
-            res = generate_response(self.messages, img_path)
+            # Use session-aware response generation
+            res = generate_response_with_session(
+                user_input="Generate a response based on conversation context",
+                img_path=img_path
+            )
+            
             if res:
                 msg_2 = {
                     'type': 'suggested_response',
@@ -140,7 +179,6 @@ class WebSocketServer:
 
         elif msg_json['command'] == 'displayMedia':
             self.last_displayed = msg_json['payload']
-            # If displaying an image, set it as latest image
             media_path = os.path.join("participant_data/media", msg_json['payload'])
             if self._is_image_file(msg_json['payload']):
                 self.set_latest_image(media_path)
@@ -148,7 +186,6 @@ class WebSocketServer:
 
         elif msg_json['command'] == 'displayFace':
             self.last_displayed = None
-            # Deactivate image question mode when showing face
             self.deactivate_image_question_mode()
             await self.send_message(PATH_TEMI, msg_json)
 
@@ -180,11 +217,15 @@ class WebSocketServer:
 
         elif msg_json['command'] == 'identify':
             if msg_json.get('payload') == 'wizard':
+                from llm_model import get_session_info
+                session_info = get_session_info()
+                
                 msg = {
                     'type': 'initial_status',
                     'data': {
                         'behavior_mode': self.behavior_mode,
-                        'last_displayed': self.last_displayed
+                        'last_displayed': self.last_displayed,
+                        'current_session': session_info
                     }
                 }
                 await self.send_message(PATH_CONTROL, msg)
@@ -199,23 +240,21 @@ class WebSocketServer:
         if msg_json['type'] == 'asr_result':
             user_query = msg_json['data']
             
-            # Add user message to conversation
-            self.messages.append({
-                'role': 'user',
-                'content': user_query
-            })
-            self.save_messages()
-            
             # Send ASR result to control panel
             await self.send_message(PATH_CONTROL, msg_json)
             
-            # Generate response - include image if we're in image question mode
+            # Generate response using session-aware function
             img_path = None
             if self.image_question_mode and self.latest_image and os.path.exists(self.latest_image):
                 img_path = self.latest_image
                 print(f'[INFO] Including image in response (question mode active): {img_path}')
             
-            res = generate_response(self.messages, img_path)
+            # This will automatically add user message and assistant response to current session
+            res = generate_response_with_session(
+                user_input=user_query,
+                img_path=img_path
+            )
+            
             if res:
                 msg_2 = {
                     'type': 'suggested_response',
@@ -228,13 +267,11 @@ class WebSocketServer:
                 await self.send_message(PATH_CONTROL, msg_2)
         
         elif msg_json['type'] == 'picture_taken':
-            # Handle when Temi takes a picture
             image_filename = msg_json.get('data', {}).get('filename')
             if image_filename:
                 image_path = os.path.join("participant_data/media", image_filename)
                 self.set_latest_image(image_path)
                 
-                # Notify control panel
                 response_msg = {
                     'type': 'picture_taken',
                     'data': {
@@ -246,10 +283,8 @@ class WebSocketServer:
                 await self.send_message(PATH_CONTROL, response_msg)
 
         elif msg_json['type'] == 'start_image_questions':
-            # Handle when user clicks "start asking questions" button on Temi display
             self.activate_image_question_mode()
             
-            # Notify control panel that image question mode is now active
             response_msg = {
                 'type': 'image_question_mode_activated',
                 'data': {
@@ -260,14 +295,12 @@ class WebSocketServer:
             await self.send_message(PATH_CONTROL, response_msg)
 
         elif msg_json['type'] == 'stop_image_questions':
-            # Handle when user stops asking questions about the image
             self.deactivate_image_question_mode()
             
-            # Notify control panel
             response_msg = {
                 'type': 'image_question_mode_deactivated',
                 'data': {
-                    'message': 'Image question mode deactivated.'
+                    'message': 'Image question mode deactivated. User can now ask questions without image context.'
                 }
             }
             await self.send_message(PATH_CONTROL, response_msg)

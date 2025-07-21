@@ -7,6 +7,14 @@ from io import BytesIO
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+from llm_model import (
+    start_new_session, end_current_session, get_session_info, 
+    handle_session_command, get_current_session_messages
+)
+import json
+from datetime import datetime
+from fastapi.responses import FileResponse
+
 from fastapi import (
     FastAPI, WebSocket, WebSocketDisconnect,
     Request, UploadFile, File
@@ -72,13 +80,26 @@ async def participant_ws(websocket: WebSocket):
 
 @app.get("/status")
 def get_status():
-    return {
-        "behavior_mode": server.behavior_mode,
-        "message_count": len(server.messages),
-        "active_connections": {
-            k: len(v) for k, v in server.connections.items()
+    try:
+        session_info = get_session_info()
+        return {
+            "behavior_mode": server.behavior_mode,
+            "message_count": len(server.messages),
+            "active_connections": {
+                k: len(v) for k, v in server.connections.items()
+            },
+            "current_session": session_info
         }
-    }
+    except Exception as e:
+        print(f"[ERROR] Status endpoint error: {e}")
+        return {
+            "behavior_mode": server.behavior_mode,
+            "message_count": len(server.messages),
+            "active_connections": {
+                k: len(v) for k, v in server.connections.items()
+            },
+            "current_session": {"active": False, "error": str(e)}
+        }
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -223,19 +244,19 @@ async def analyze_media(request: AnalyzeRequest):
     if not os.path.exists(file_path):
         return JSONResponse(content={"success": False, "error": "File not found"}, status_code=404)
 
-    # Import the new Gemini-based function
+    # Import the session-aware function
     from llm_model import generate_response_with_context
     
-    # UPDATED: Much shorter, more natural conversation prompts
+    # Determine the query based on the request mode
     if request.mode == "conversation":
-        query = "Say hi! What learning opportunities do you see in this picture? Keep it brief and friendly."
+        query = "What learning opportunities do you see in this picture? Keep it brief and friendly."
     elif request.mode == "suggestion":
         query = "Give 1-2 useful suggestions of what learning opportunities you see based on this image."
     else:
         query = "Briefly describe what you see in this image."
 
     try:
-        # Use the new Gemini-based function
+        # Use the context-aware function (which will add to current session)
         result = generate_response_with_context(
             query=query,
             img_path=file_path,
@@ -250,3 +271,138 @@ async def analyze_media(request: AnalyzeRequest):
     except Exception as e:
         print(f'[ERROR] analyze_media: {e}')
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+    
+
+# Endpoints for session management    
+@app.get("/api/session/status")
+async def get_session_status():
+    """Get current session information."""
+    try:
+        result = get_session_info()
+        print(f"[DEBUG] Session status request - returning: {result}")
+        return result
+    except Exception as e:
+        print(f"[ERROR] Session status error: {e}")
+        return JSONResponse(content={"error": str(e), "active": False}, status_code=500)
+
+@app.post("/api/session/start")
+async def start_family_session(request: Request):
+    """Start a new family session."""
+    try:
+        body = await request.json()
+        family_id = body.get('family_id') or f"family_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        print(f"[DEBUG] Starting session for family: {family_id}")
+        result = handle_session_command('start', family_id)
+        print(f"[DEBUG] Session start result: {result}")
+        
+        # Notify all connected clients about new session
+        await server.broadcast_to_all({
+            "type": "session_started",
+            "family_id": family_id,
+            "session_id": result.get('session_id')
+        })
+        
+        return result
+    except Exception as e:
+        print(f"[ERROR] Session start error: {e}")
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+@app.post("/api/session/end")
+async def end_family_session():
+    """End the current family session and save data."""
+    try:
+        print("[DEBUG] Ending session...")
+        result = handle_session_command('end')
+        print(f"[DEBUG] Session end result: {result}")
+        
+        # Notify all connected clients about session end
+        await server.broadcast_to_all({
+            "type": "session_ended",
+            "filepath": result.get('filepath')
+        })
+        
+        return result
+    except Exception as e:
+        print(f"[ERROR] Session end error: {e}")
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+@app.post("/api/session/download")
+async def download_current_session():
+    """Save and get download path for current session."""
+    try:
+        result = handle_session_command('download')
+        return result
+    except Exception as e:
+        print(f"[ERROR] Session download error: {e}")
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+@app.get("/api/session/messages")
+async def get_session_messages():
+    """Get all messages from current session."""
+    try:
+        messages = get_current_session_messages()
+        return {"status": "success", "messages": messages, "count": len(messages)}
+    except Exception as e:
+        print(f"[ERROR] Session messages error: {e}")
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+@app.get("/api/session/download-file/{session_filename}")
+async def download_session_file(session_filename: str):
+    """Download a specific session file."""
+    try:
+        filepath = f"sessions/{session_filename}"
+        if os.path.exists(filepath):
+            return FileResponse(
+                path=filepath,
+                filename=session_filename,
+                media_type='application/json'
+            )
+        else:
+            return JSONResponse(content={"error": "File not found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.get("/api/sessions/list")
+async def list_all_sessions():
+    """List all saved session files."""
+    try:
+        sessions_dir = "sessions"
+        if not os.path.exists(sessions_dir):
+            return {"sessions": []}
+        
+        files = [f for f in os.listdir(sessions_dir) if f.endswith('.json')]
+        files.sort(reverse=True)  # Most recent first
+        
+        session_info = []
+        for file in files:
+            filepath = os.path.join(sessions_dir, file)
+            try:
+                with open(filepath, 'r') as f:
+                    data = json.load(f)
+                    session_info.append({
+                        'filename': file,
+                        'family_id': data.get('family_id'),
+                        'start_time': data.get('start_time'),
+                        'end_time': data.get('end_time'),
+                        'message_count': data.get('message_count', 0),
+                        'duration_minutes': calculate_session_duration(data.get('start_time'), data.get('end_time'))
+                    })
+            except:
+                continue
+                
+        return {"sessions": session_info}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+def calculate_session_duration(start_time_str, end_time_str):
+    """Calculate session duration in minutes."""
+    try:
+        if not start_time_str or not end_time_str:
+            return None
+        start = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+        end = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+        duration = end - start
+        return round(duration.total_seconds() / 60, 1)
+    except:
+        return None

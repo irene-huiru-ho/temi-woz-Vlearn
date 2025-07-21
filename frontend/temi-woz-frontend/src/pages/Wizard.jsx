@@ -21,6 +21,13 @@ const WizardPage = () => {
   const [showControls, setShowControls] = useState(true);
   const [autoSendCountdown, setAutoSendCountdown] = useState(0);
 
+  // NEW: Session management state
+  const [sessionInfo, setSessionInfo] = useState({ active: false });
+  const [familyIdInput, setFamilyIdInput] = useState("");
+  const [sessionStartTime, setSessionStartTime] = useState(null);
+  const [showSessionPanel, setShowSessionPanel] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const wsRef = useRef(null);
   const logEndRef = useRef(null);
   const automationRef = useRef(automationEnabled);
@@ -44,6 +51,142 @@ const WizardPage = () => {
   useEffect(() => {
     console.log("Automation state changed to:", automationEnabled);
   }, [automationEnabled]);
+
+  // NEW: Session management functions
+  const refreshSessionStatus = async (isManual = false) => {
+    if (isManual) setIsRefreshing(true);
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/session/status');
+      const data = await response.json();
+      setSessionInfo(data);
+      
+      if (data.active && !sessionStartTime) {
+        setSessionStartTime(new Date(data.start_time));
+      } else if (!data.active) {
+        setSessionStartTime(null);
+      }
+      
+      // Only add log entry for MANUAL refreshes
+      if (isManual) {
+        setLog(prev => [...prev, `[${getTimestamp()}] 🔄 Status refreshed: ${data.active ? `${data.family_id} (${data.message_count} msgs)` : 'No active session'}`]);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching session status:', error);
+      // Only log errors for MANUAL refreshes - ignore automatic refresh errors
+      if (isManual) {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to refresh status: ${error.message}`]);
+      }
+    } finally {
+      if (isManual) setIsRefreshing(false);
+    }
+  };
+
+  const startFamilySession = async () => {
+    const familyId = familyIdInput.trim() || `Family_${new Date().getHours()}${new Date().getMinutes()}`;
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/session/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ family_id: familyId })
+      });
+      
+      const data = await response.json();
+      if (data.status === 'success') {
+        setLog(prev => [...prev, `[${getTimestamp()}] 🟢 SESSION STARTED: ${data.family_id}`]);
+        setSessionStartTime(new Date());
+        setFamilyIdInput("");
+        refreshSessionStatus();
+      } else {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to start session: ${data.message}`]);
+      }
+    } catch (error) {
+      setLog(prev => [...prev, `[${getTimestamp()}] ❌ Error starting session: ${error.message}`]);
+    }
+  };
+
+  const endFamilySession = async () => {
+    if (!window.confirm('End the current family session? This will save all conversation data and reset for the next family.')) {
+      return;
+    }
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/session/end', { method: 'POST' });
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setLog(prev => [...prev, `[${getTimestamp()}] 🔴 SESSION ENDED & SAVED: ${data.filepath}`]);
+        
+        // Download the wizard message log
+        const logContent = log.join("\n");
+        const logBlob = new Blob([logContent], { type: "text/plain;charset=utf-8" });
+        const logUrl = URL.createObjectURL(logBlob);
+        const logLink = document.createElement("a");
+        logLink.href = logUrl;
+        
+        // Use the same family ID from the session for the log filename
+        const familyId = sessionInfo.family_id || 'unknown_family';
+        logLink.download = `wizard-log-${familyId}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+        logLink.click();
+        URL.revokeObjectURL(logUrl);
+        
+        // Wait a moment for the user to see the "session ended" message, then clear the log
+        setTimeout(() => {
+          setLog([]);
+          localStorage.removeItem("wizardMessageLog"); // Clear persisted log
+        }, 2000);
+        
+        setSessionStartTime(null);
+        refreshSessionStatus();
+        
+        // Auto-download the session conversation data
+        if (data.filepath) {
+          const filename = data.filepath.split('/').pop();
+          // Small delay to avoid download conflicts
+          setTimeout(() => {
+            window.open(`http://localhost:8000/api/session/download-file/${filename}`);
+          }, 500);
+        }
+      } else {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to end session: ${data.message}`]);
+      }
+    } catch (error) {
+      setLog(prev => [...prev, `[${getTimestamp()}] ❌ Error ending session: ${error.message}`]);
+    }
+  };
+
+  const downloadCurrentSession = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/session/download', { method: 'POST' });
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setLog(prev => [...prev, `[${getTimestamp()}] 💾 Session downloaded: ${data.filepath}`]);
+        const filename = data.filepath.split('/').pop();
+        window.open(`http://localhost:8000/api/session/download-file/${filename}`);
+      } else {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Download failed: ${data.message}`]);
+      }
+    } catch (error) {
+      setLog(prev => [...prev, `[${getTimestamp()}] ❌ Download error: ${error.message}`]);
+    }
+  };
+
+  // NEW: Calculate session duration
+  const getSessionDuration = () => {
+    if (!sessionStartTime) return "--";
+    const duration = Math.round((new Date() - sessionStartTime) / 60000);
+    return `${duration} min`;
+  };
+
+  // NEW: Auto-refresh session status
+  useEffect(() => {
+    refreshSessionStatus();
+    const interval = setInterval(refreshSessionStatus, 10000); // Every 10 seconds
+    return () => clearInterval(interval);
+  }, []);
 
   const autoSendResponse = (responseText) => {
     const currentAutomation = automationRef.current;
@@ -138,7 +281,14 @@ const WizardPage = () => {
     console.log('onWsMessage received:', data)
     console.log('Current automation state:', automationEnabled)
     
-    if (data.type === 'asr_result') {
+    // NEW: Handle session-related messages
+    if (data.type === 'session_started') {
+      setLog((prev) => [...prev, `[${getTimestamp()}] 🟢 New session started: ${data.family_id}`]);
+      refreshSessionStatus();
+    } else if (data.type === 'session_ended') {
+      setLog((prev) => [...prev, `[${getTimestamp()}] 🔴 Session ended: ${data.filepath}`]);
+      refreshSessionStatus();
+    } else if (data.type === 'asr_result') {
       setLog((prev) => [...prev, `[${getTimestamp()}] Received: ${data.data}`]);
     } else if (data.type === 'assistant_response') {
       setLog((prev) => [...prev, `[${getTimestamp()}] Temi: ${data.data}`]);
@@ -296,6 +446,18 @@ const WizardPage = () => {
             border-top: 1px solid #dee2e6;
             box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
           }
+
+          .session-status-active {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+          }
+
+          .session-status-inactive {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+          }
         `}
       </style>
 
@@ -303,8 +465,14 @@ const WizardPage = () => {
         <div className="d-flex justify-content-between align-items-center w-100 px-3">
           <span className="navbar-brand mb-0 h1" style={{ fontSize: '1.1rem', fontWeight: '600' }}>
             🤖 Wizard Control Dashboard
+            {/* NEW: Session status in navbar */}
+            {sessionInfo.active && (
+              <span className="badge bg-success ms-2" style={{ fontSize: '0.8rem', borderRadius: '6px' }}>
+                {sessionInfo.family_id} • {getSessionDuration()} • {sessionInfo.message_count} msgs
+              </span>
+            )}
             {automationEnabled && (
-              <span className="badge bg-success ms-2" style={{ fontSize: '0.9rem', borderRadius: '6px' }}>
+              <span className="badge bg-info ms-2" style={{ fontSize: '0.9rem', borderRadius: '6px' }}>
                 {autoSendCountdown > 0 ? `AUTO ${autoSendCountdown}s` : 'AUTO ON'}
               </span>
             )}
@@ -314,12 +482,20 @@ const WizardPage = () => {
               </span>
             )}
           </span>
-          <button
-            className="btn btn-clean btn-outline-light btn-sm"
-            onClick={() => setShowControls(!showControls)}
-          >
-            {showControls ? "Hide Controls" : "Show Controls"}
-          </button>
+          <div className="d-flex gap-2">
+            <button
+              className="btn btn-clean btn-outline-light btn-sm"
+              onClick={() => setShowSessionPanel(!showSessionPanel)}
+            >
+              {showSessionPanel ? "Hide Session" : "Show Session"}
+            </button>
+            <button
+              className="btn btn-clean btn-outline-light btn-sm"
+              onClick={() => setShowControls(!showControls)}
+            >
+              {showControls ? "Hide Controls" : "Show Controls"}
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -338,14 +514,101 @@ const WizardPage = () => {
         </div>
       )}
 
+      {/* NEW: Session Management Panel */}
+      {showSessionPanel && (
+        <div
+          className="position-fixed"
+          style={{
+            top: '70px',
+            right: '15px',
+            width: '320px',
+            zIndex: 1040,
+            maxHeight: 'calc(100vh - 90px)',
+            overflowY: 'auto'
+          }}
+        >
+          <div className="card card-clean shadow">
+            <div className="card-header bg-warning text-dark" style={{ borderRadius: '12px 12px 0 0' }}>
+              <h6 className="mb-0" style={{ fontWeight: '600' }}>📊 Research Session Control</h6>
+            </div>
+            <div className="card-body p-3">
+              <div 
+                className={`p-2 mb-3 rounded ${sessionInfo.active ? 'session-status-active' : 'session-status-inactive'}`}
+                style={{ fontSize: '0.9rem', fontWeight: '600' }}
+              >
+                {sessionInfo.active ? '🟢 ACTIVE SESSION' : '🔴 NO ACTIVE SESSION'}
+              </div>
+              
+              {sessionInfo.active ? (
+                <div>
+                  <div className="mb-2" style={{ fontSize: '0.85rem' }}>
+                    <strong>Family:</strong> {sessionInfo.family_id}<br/>
+                    <strong>Duration:</strong> {getSessionDuration()}<br/>
+                    <strong>Messages:</strong> {sessionInfo.message_count}
+                  </div>
+                  <div className="d-flex gap-2">
+                    <button
+                      className="btn btn-clean btn-danger btn-sm flex-fill"
+                      onClick={endFamilySession}
+                      style={{ fontSize: '0.8rem' }}
+                    >
+                      🔴 End Session
+                    </button>
+                    <button
+                      className="btn btn-clean btn-outline-primary btn-sm flex-fill"
+                      onClick={downloadCurrentSession}
+                      style={{ fontSize: '0.8rem' }}
+                    >
+                      💾 Download
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-2">
+                    <input
+                      type="text"
+                      className="form-control form-control-clean form-control-sm"
+                      placeholder="Family ID (e.g., Family_A)"
+                      value={familyIdInput}
+                      onChange={(e) => setFamilyIdInput(e.target.value)}
+                      style={{ fontSize: '0.85rem' }}
+                    />
+                  </div>
+                  <button
+                    className="btn btn-clean btn-success btn-sm w-100"
+                    onClick={startFamilySession}
+                    style={{ fontSize: '0.85rem' }}
+                  >
+                    🟢 Start New Family Session
+                  </button>
+                </div>
+              )}
+              
+              <hr className="my-2" />
+              <button
+                className="btn btn-clean btn-outline-secondary btn-sm w-100"
+                onClick={() => refreshSessionStatus(true)}
+                disabled={isRefreshing}
+                style={{ fontSize: '0.8rem' }}
+              >
+                {isRefreshing ? '🔄 Refreshing...' : '🔄 Refresh Status'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div 
         className="container-fluid main-content" 
         style={{ 
           marginTop: '70px', 
           height: 'calc(100vh - 70px)',
+          paddingTop: '0',
           paddingBottom: showControls ? '200px' : '20px',
-          transition: 'padding-bottom 0.3s ease',
-          padding: '0 15px'
+          paddingLeft: '15px',
+          paddingRight: showSessionPanel ? '350px' : '15px',
+          transition: 'padding-bottom 0.3s ease'
         }}
       >
         <div className="row h-100">
