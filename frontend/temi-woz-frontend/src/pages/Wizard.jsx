@@ -21,14 +21,17 @@ const WizardPage = () => {
   const [showControls, setShowControls] = useState(true);
   const [autoSendCountdown, setAutoSendCountdown] = useState(0);
 
-  // NEW: Session management state
+  // NEW: Simulated User Input State
+  const [simulatedUserInput, setSimulatedUserInput] = useState("");
+
+  // Session management state
   const [sessionInfo, setSessionInfo] = useState({ active: false });
   const [familyIdInput, setFamilyIdInput] = useState("");
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [showSessionPanel, setShowSessionPanel] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // NEW: Prompt configuration state
+  // Prompt configuration state
   const [childAge, setChildAge] = useState(5);
   const [conversationFocus, setConversationFocus] = useState('Open-ended');
   const [customMessage, setCustomMessage] = useState('');
@@ -60,7 +63,30 @@ const WizardPage = () => {
     console.log("Automation state changed to:", automationEnabled);
   }, [automationEnabled]);
 
-  // NEW: Session management functions
+  // NEW: Send Simulated User Input Function
+  const sendSimulatedUserInput = () => {
+    const text = simulatedUserInput.trim();
+    if (!text) return;
+    
+    // Log the simulated input in the message log
+    setLog((prev) => [...prev, `[${getTimestamp()}] 🎭 Simulated User Input: ${text}`]);
+    
+    // Send the simulated input to the backend via WebSocket
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        command: "simulateUserInput",
+        payload: text,
+        continue_previous_topic: continuePreviousTopic
+      }));
+    } else {
+      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ WebSocket not connected - cannot send simulated input`]);
+    }
+    
+    // Clear the input field
+    setSimulatedUserInput("");
+  };
+
+  // Session management functions
   const refreshSessionStatus = async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
     
@@ -75,14 +101,12 @@ const WizardPage = () => {
         setSessionStartTime(null);
       }
       
-      // Only add log entry for MANUAL refreshes
       if (isManual) {
         setLog(prev => [...prev, `[${getTimestamp()}] 🔄 Status refreshed: ${data.active ? `${data.family_id} (${data.message_count} msgs)` : 'No active session'}`]);
       }
       
     } catch (error) {
       console.error('Error fetching session status:', error);
-      // Only log errors for MANUAL refreshes - ignore automatic refresh errors
       if (isManual) {
         setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to refresh status: ${error.message}`]);
       }
@@ -112,7 +136,6 @@ const WizardPage = () => {
         setSessionStartTime(new Date());
         setFamilyIdInput("");
         
-        // Immediately update session info with the configuration we just sent
         setSessionInfo({
           active: true,
           session_id: data.session_id,
@@ -124,7 +147,6 @@ const WizardPage = () => {
           start_time: new Date().toISOString()
         });
         
-        // Also refresh from backend to ensure sync
         setTimeout(() => refreshSessionStatus(), 500);
       } else {
         setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to start session: ${data.message}`]);
@@ -146,32 +168,27 @@ const WizardPage = () => {
       if (data.status === 'success') {
         setLog(prev => [...prev, `[${getTimestamp()}] 🔴 SESSION ENDED & SAVED: ${data.filepath}`]);
         
-        // Download the wizard message log
         const logContent = log.join("\n");
         const logBlob = new Blob([logContent], { type: "text/plain;charset=utf-8" });
         const logUrl = URL.createObjectURL(logBlob);
         const logLink = document.createElement("a");
         logLink.href = logUrl;
         
-        // Use the same family ID from the session for the log filename
         const familyId = sessionInfo.family_id || 'unknown_family';
         logLink.download = `wizard-log-${familyId}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
         logLink.click();
         URL.revokeObjectURL(logUrl);
         
-        // Wait a moment for the user to see the "session ended" message, then clear the log
         setTimeout(() => {
           setLog([]);
-          localStorage.removeItem("wizardMessageLog"); // Clear persisted log
+          localStorage.removeItem("wizardMessageLog");
         }, 2000);
         
         setSessionStartTime(null);
         refreshSessionStatus();
         
-        // Auto-download the session conversation data
         if (data.filepath) {
           const filename = data.filepath.split('/').pop();
-          // Small delay to avoid download conflicts
           setTimeout(() => {
             window.open(`http://localhost:8000/api/session/download-file/${filename}`);
           }, 500);
@@ -201,7 +218,6 @@ const WizardPage = () => {
     }
   };
 
-  // NEW: Update session configuration mid-session
   const updateSessionConfig = async () => {
     if (!sessionInfo.active) return;
     
@@ -219,7 +235,6 @@ const WizardPage = () => {
       
       const data = await response.json();
       if (data.status === 'success') {
-        // Log the configuration change
         const changes = [];
         if (sessionInfo.child_age !== childAge) changes.push(`Age ${sessionInfo.child_age}→${childAge}`);
         if (sessionInfo.conversation_focus !== conversationFocus) changes.push(`Focus ${sessionInfo.conversation_focus}→${conversationFocus}`);
@@ -227,7 +242,6 @@ const WizardPage = () => {
         
         setLog(prev => [...prev, `[${getTimestamp()}] 🔧 CONFIG UPDATED: ${changes.join(', ')}`]);
         
-        // Update local session info immediately
         setSessionInfo(prev => ({
           ...prev,
           child_age: childAge,
@@ -235,7 +249,6 @@ const WizardPage = () => {
           custom_message: customMessage.trim()
         }));
         
-        // Refresh from backend to ensure sync
         setTimeout(() => refreshSessionStatus(), 300);
       } else {
         setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to update config: ${data.message}`]);
@@ -247,14 +260,12 @@ const WizardPage = () => {
     }
   };
 
-  // NEW: Calculate session duration
   const getSessionDuration = () => {
     if (!sessionStartTime) return "--";
     const duration = Math.round((new Date() - sessionStartTime) / 60000);
     return `${duration} min`;
   };
 
-  // NEW: Focus area options
   const focusAreas = [
     'Open-ended',
     'Literacy and Communication', 
@@ -266,7 +277,6 @@ const WizardPage = () => {
     'History'
   ];
 
-  // NEW: Focus area descriptions for UI
   const focusDescriptions = {
     'Open-ended': 'Mix of age-appropriate topics',
     'Literacy and Communication': 'Words, letters, reading, writing, expressing ideas',
@@ -278,17 +288,14 @@ const WizardPage = () => {
     'History': 'Historical facts and knowledge'
   };
 
-  // NEW: Auto-refresh session status and sync config
   useEffect(() => {
     refreshSessionStatus();
-    const interval = setInterval(refreshSessionStatus, 10000); // Every 10 seconds
+    const interval = setInterval(refreshSessionStatus, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // NEW: Sync local config state with session info when it changes
   useEffect(() => {
     if (sessionInfo.active) {
-      // Only update local state if session has config data
       if (sessionInfo.child_age !== undefined) setChildAge(sessionInfo.child_age);
       if (sessionInfo.conversation_focus) setConversationFocus(sessionInfo.conversation_focus);
       if (sessionInfo.custom_message !== undefined) setCustomMessage(sessionInfo.custom_message || '');
@@ -336,137 +343,95 @@ const WizardPage = () => {
     }
   };
 
-  // IMPROVED: Enhanced handleSendToLLM function with better error handling
-const handleSendToLLM = async (imageFilename, mode) => {
-  setActiveMediaContext({ filename: imageFilename, mode });
-  setLog((prev) => [
-    ...prev,
-    `[${getTimestamp()}] ${
-      mode === "conversation" ? "Started conversation" : "Suggested response"
-    } for "${imageFilename}" ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`,
-  ]);
+  const handleSendToLLM = async (imageFilename, mode) => {
+    setActiveMediaContext({ filename: imageFilename, mode });
+    setLog((prev) => [
+      ...prev,
+      `[${getTimestamp()}] ${
+        mode === "conversation" ? "Started conversation" : "Suggested response"
+      } for "${imageFilename}" ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`,
+    ]);
 
-  const requestData = {
-    image_filename: imageFilename,
-    mode: mode || "default",
-    continue_previous_topic: continuePreviousTopic,
-  };
+    const requestData = {
+      image_filename: imageFilename,
+      mode: mode || "default",
+      continue_previous_topic: continuePreviousTopic,
+    };
 
-  console.log("Sending to /api/analyze-media:", requestData);
-  
-  try {
-    // Add loading state
-    setLog((prev) => [...prev, `[${getTimestamp()}] 🔄 Sending image to AI for analysis...`]);
+    console.log("Sending to /api/analyze-media:", requestData);
     
-    const res = await fetch("http://localhost:8000/api/analyze-media", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestData),
-    });
-    
-    console.log("Response status:", res.status, res.statusText);
-    
-    if (!res.ok) {
-      // Handle different error status codes
-      let errorMessage = `Server error: ${res.status} ${res.statusText}`;
+    try {
+      setLog((prev) => [...prev, `[${getTimestamp()}] 🔄 Sending image to AI for analysis...`]);
       
-      try {
-        const errorData = await res.json();
-        errorMessage += ` - ${errorData.message || errorData.error || 'Unknown error'}`;
-        console.log("Error response data:", errorData);
-      } catch (parseError) {
-        console.log("Could not parse error response as JSON");
-        // Try to get text response for more details
+      const res = await fetch("http://localhost:8000/api/analyze-media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestData),
+      });
+      
+      console.log("Response status:", res.status, res.statusText);
+      
+      if (!res.ok) {
+        let errorMessage = `Server error: ${res.status} ${res.statusText}`;
+        
         try {
-          const errorText = await res.text();
-          if (errorText) {
-            errorMessage += ` - ${errorText.substring(0, 100)}`;
-            console.log("Error response text:", errorText);
+          const errorData = await res.json();
+          errorMessage += ` - ${errorData.message || errorData.error || 'Unknown error'}`;
+          console.log("Error response data:", errorData);
+        } catch (parseError) {
+          console.log("Could not parse error response as JSON");
+          try {
+            const errorText = await res.text();
+            if (errorText) {
+              errorMessage += ` - ${errorText.substring(0, 100)}`;
+              console.log("Error response text:", errorText);
+            }
+          } catch (textError) {
+            console.log("Could not get error response text");
           }
-        } catch (textError) {
-          console.log("Could not get error response text");
         }
+        
+        throw new Error(errorMessage);
       }
       
-      throw new Error(errorMessage);
+      const data = await res.json();
+      console.log("Success response data:", data);
+      
+      const llmOutput = data.analysis || "No response from LLM";
+      setLlmResponse(llmOutput);
+      setInputText(llmOutput);
+      
+      setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AI analysis completed successfully`]);
+      
+    } catch (error) {
+      console.error("Error in handleSendToLLM:", error);
+      
+      let userMessage = "Error contacting LLM: ";
+      
+      if (error.message.includes('fetch')) {
+        userMessage += "Cannot connect to server. Check if backend is running.";
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Connection Error: Backend server may be down`]);
+      } else if (error.message.includes('500')) {
+        userMessage += "Server internal error. Check backend logs for details.";
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Server Error (500): ${error.message}`]);
+      } else if (error.message.includes('404')) {
+        userMessage += "API endpoint not found. Check backend implementation.";
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ API Not Found (404): Check backend routes`]);
+      } else if (error.message.includes('timeout')) {
+        userMessage += "Request timed out. LLM processing may be slow.";
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Timeout Error: LLM processing took too long`]);
+      } else {
+        userMessage += error.message;
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Unexpected Error: ${error.message}`]);
+      }
+      
+      setLlmResponse(userMessage);
+      setInputText("");
+      
+      setLog((prev) => [...prev, `[${getTimestamp()}] 🔍 Debug Info: Image="${imageFilename}", Mode="${mode}", ContinueTopic=${continuePreviousTopic}`]);
+      setLog((prev) => [...prev, `[${getTimestamp()}] 💡 Troubleshooting: Check backend server, API implementation, and LLM configuration`]);
     }
-    
-    const data = await res.json();
-    console.log("Success response data:", data);
-    
-    const llmOutput = data.analysis || "No response from LLM";
-    setLlmResponse(llmOutput);
-    setInputText(llmOutput);
-    
-    setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AI analysis completed successfully`]);
-    
-  } catch (error) {
-    console.error("Error in handleSendToLLM:", error);
-    
-    // Provide user-friendly error messages based on error type
-    let userMessage = "Error contacting LLM: ";
-    
-    if (error.message.includes('fetch')) {
-      userMessage += "Cannot connect to server. Check if backend is running.";
-      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Connection Error: Backend server may be down`]);
-    } else if (error.message.includes('500')) {
-      userMessage += "Server internal error. Check backend logs for details.";
-      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Server Error (500): ${error.message}`]);
-    } else if (error.message.includes('404')) {
-      userMessage += "API endpoint not found. Check backend implementation.";
-      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ API Not Found (404): Check backend routes`]);
-    } else if (error.message.includes('timeout')) {
-      userMessage += "Request timed out. LLM processing may be slow.";
-      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Timeout Error: LLM processing took too long`]);
-    } else {
-      userMessage += error.message;
-      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Unexpected Error: ${error.message}`]);
-    }
-    
-    setLlmResponse(userMessage);
-    setInputText(""); // Don't populate input with error message
-    
-    // Add debugging information to log
-    setLog((prev) => [...prev, `[${getTimestamp()}] 🔍 Debug Info: Image="${imageFilename}", Mode="${mode}", ContinueTopic=${continuePreviousTopic}`]);
-    
-    // Suggest troubleshooting steps
-    setLog((prev) => [...prev, `[${getTimestamp()}] 💡 Troubleshooting: Check backend server, API implementation, and LLM configuration`]);
-  }
-};
-
-  // const handleSendToLLM = async (imageFilename, mode) => {
-  //   setActiveMediaContext({ filename: imageFilename, mode });
-  //   setLog((prev) => [
-  //     ...prev,
-  //     `[${getTimestamp()}] ${
-  //       mode === "conversation" ? "Started conversation" : "Suggested response"
-  //     } for "${imageFilename}" ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`,
-  //   ]);
-  //   console.log("Sending to /api/analyze-media:", {
-  //     image_filename: imageFilename,
-  //     mode: mode || "default",
-  //     continue_previous_topic: continuePreviousTopic,
-  //   });
-  //   try {
-  //     const res = await fetch("http://localhost:8000/api/analyze-media", {
-  //       method: "POST",
-  //       headers: { "Content-Type": "application/json" },
-  //       body: JSON.stringify({
-  //         image_filename: imageFilename,
-  //         mode: mode || "default",
-  //         continue_previous_topic: continuePreviousTopic,
-  //       }),
-  //     });
-  //     console.log("Sending to LLM with mode:", mode, "continue_previous_topic:", continuePreviousTopic);
-  //     const data = await res.json();
-  //     const llmOutput = data.analysis || "No response from LLM";
-  //     setLlmResponse(llmOutput);
-  //     setInputText(llmOutput);
-  //   } catch (error) {
-  //     setLlmResponse("Error contacting LLM.");
-  //     console.error(error);
-  //   }
-  // };
+  };
 
   const sendMessage = (message) => {
     sendMessageWS(message);
@@ -492,7 +457,6 @@ const handleSendToLLM = async (imageFilename, mode) => {
     console.log('onWsMessage received:', data)
     console.log('Current automation state:', automationEnabled)
     
-    // NEW: Handle session-related messages
     if (data.type === 'session_started') {
       setLog((prev) => [...prev, `[${getTimestamp()}] 🟢 New session started: ${data.family_id}`]);
       refreshSessionStatus();
@@ -669,6 +633,16 @@ const handleSendToLLM = async (imageFilename, mode) => {
             color: #721c24;
             border: 1px solid #f5c6cb;
           }
+
+          .simulated-input-field {
+            background-color: #f8f9fa;
+            border-color: #6c757d;
+          }
+
+          .simulated-input-field:focus {
+            border-color: #fd7e14;
+            box-shadow: 0 0 0 0.2rem rgba(253, 126, 20, 0.15);
+          }
         `}
       </style>
 
@@ -676,7 +650,6 @@ const handleSendToLLM = async (imageFilename, mode) => {
         <div className="d-flex justify-content-between align-items-center w-100 px-3">
           <span className="navbar-brand mb-0 h1" style={{ fontSize: '1.1rem', fontWeight: '600' }}>
             🤖 Wizard Control Dashboard
-            {/* NEW: Session status in navbar */}
             {sessionInfo.active && (
               <span className="badge bg-success ms-2" style={{ fontSize: '0.8rem', borderRadius: '6px' }}>
                 {sessionInfo.family_id} • Age {sessionInfo.child_age || childAge} • {conversationFocus} • {getSessionDuration()} • {sessionInfo.message_count} msgs
@@ -725,7 +698,6 @@ const handleSendToLLM = async (imageFilename, mode) => {
         </div>
       )}
 
-      {/* NEW: Session Management Panel */}
       {showSessionPanel && (
         <div
           className="position-fixed"
@@ -737,7 +709,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
             maxHeight: showControls ? 'calc(100vh - 260px)' : 'calc(100vh - 100px)',
             overflowY: 'auto',
             bottom: showControls ? '190px' : '20px',
-            transition: 'all 0.3s ease' // Smooth transition like main content
+            transition: 'all 0.3s ease'
           }}
         >
           <div className="card card-clean shadow">
@@ -755,7 +727,6 @@ const handleSendToLLM = async (imageFilename, mode) => {
                 {sessionInfo.active ? '🟢 ACTIVE SESSION' : '🔴 NO ACTIVE SESSION'}
               </div>
               
-              {/* Configuration Section - now available during both active and inactive sessions */}
               <div className="mb-3">
                 <div className="d-flex justify-content-between align-items-center mb-2">
                   <h6 className="mb-0" style={{ fontSize: '0.9rem', fontWeight: '600' }}>
@@ -772,7 +743,6 @@ const handleSendToLLM = async (imageFilename, mode) => {
                 
                 {showConfig && (
                   <div className="border rounded p-2" style={{ fontSize: '0.8rem' }}>
-                    {/* Child Age */}
                     <div className="mb-2">
                       <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
                         Child Age:
@@ -817,7 +787,6 @@ const handleSendToLLM = async (imageFilename, mode) => {
                       </div>
                     </div>
                     
-                    {/* Conversation Focus */}
                     <div className="mb-2">
                       <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
                         Conversation Focus:
@@ -838,7 +807,6 @@ const handleSendToLLM = async (imageFilename, mode) => {
                       </div>
                     </div>
                     
-                    {/* Custom Message */}
                     <div className="mb-2">
                       <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
                         Custom Notes (optional):
@@ -854,7 +822,6 @@ const handleSendToLLM = async (imageFilename, mode) => {
                       />
                     </div>
                     
-                    {/* Continue Previous Topic Toggle - Properly Contained */}
                     <div className="mb-2">
                       <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
                         Conversation Mode:
@@ -897,9 +864,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                         </div>
                       </div>
                     </div>
-
                     
-                    {/* Action Button */}
                     {sessionInfo.active ? (
                       <button
                         className="btn btn-clean btn-warning btn-sm w-100"
@@ -950,7 +915,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     <input
                       type="text"
                       className="form-control form-control-clean form-control-sm"
-                      placeholder="Family ID (e.g., Family_A)"
+                      placeholder="Family ID (e.g., F01, F02)"
                       value={familyIdInput}
                       onChange={(e) => setFamilyIdInput(e.target.value)}
                       style={{ fontSize: '0.85rem' }}
@@ -1000,13 +965,14 @@ const handleSendToLLM = async (imageFilename, mode) => {
               </div>
               <div className="card-body d-flex flex-column p-3" style={{ minHeight: 0, overflow: 'hidden' }}>
                 <div
-                  className="log-area p-3 mb-3 position-relative flex-grow-1"
+                  className="log-area p-3 mb-3 position-relative"
                   style={{ 
                     overflowY: "auto", 
                     fontSize: "0.95rem",
                     fontFamily: 'Monaco, "Lucida Console", monospace',
-                    minHeight: "400px",
-                    maxHeight: "none"
+                    minHeight: "200px",
+                    maxHeight: showControls ? "calc(100vh - 550px)" : "calc(100vh - 380px)",
+                    flex: "1 1 auto"
                   }}
                 >
                   {log.map((line, idx) => (
@@ -1022,7 +988,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                   <div ref={logEndRef} />
                 </div>
 
-                <div className="mt-auto">
+                <div style={{ flexShrink: 0 }}>
                   <div className="d-flex gap-2 mb-2">
                     <button
                       className="btn btn-clean btn-outline-secondary btn-sm flex-fill"
@@ -1099,70 +1065,113 @@ const handleSendToLLM = async (imageFilename, mode) => {
                       <div className="small mt-1">Click "Speak" to cancel auto-send</div>
                     </div>
                   )}
-                  <div className="input-group">
-                    <textarea
-                      rows={3}
-                      className="form-control form-control-clean"
-                      placeholder="Enter text for robot to speak..."
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      style={{ 
-                        fontSize: '1.05rem',
-                        lineHeight: '1.4',
-                        resize: 'vertical'
-                      }}
-                    />
-                    <div className="d-flex flex-column gap-2 ms-2">
-                      <button
-                        className="btn btn-clean btn-primary btn-lg"
-                        disabled={!inputText.trim()}
-                        onClick={() => {
-                          const text = inputText.trim();
-                          if (text) {
-                            if (window.autoSendTimers) {
-                              window.autoSendTimers.forEach(timer => clearTimeout(timer));
-                              window.autoSendTimers = [];
+
+                  <div className="mb-3">
+                    <label className="form-label text-muted mb-2" style={{ fontSize: '0.9rem', fontWeight: '600' }}>
+                      🔊 Robot Speech Output (review/edit AI responses)
+                    </label>
+                    <div className="input-group">
+                      <textarea
+                        rows={3}
+                        className="form-control form-control-clean"
+                        placeholder="Enter text for robot to speak..."
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        style={{ 
+                          fontSize: '1.05rem',
+                          lineHeight: '1.4',
+                          resize: 'vertical'
+                        }}
+                      />
+                      <div className="d-flex flex-column gap-2 ms-2">
+                        <button
+                          className="btn btn-clean btn-primary btn-lg"
+                          disabled={!inputText.trim()}
+                          onClick={() => {
+                            const text = inputText.trim();
+                            if (text) {
+                              if (window.autoSendTimers) {
+                                window.autoSendTimers.forEach(timer => clearTimeout(timer));
+                                window.autoSendTimers = [];
+                              }
+                              setAutoSendCountdown(0);
+                              
+                              sendMessage({ 
+                                command: "speak", 
+                                payload: text,
+                                continue_previous_topic: continuePreviousTopic
+                              });
+                              setLog((prev) => [...prev, `[${getTimestamp()}] Sent: ${text} ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`]);
+                              setInputText("");
                             }
-                            setAutoSendCountdown(0);
-                            
-                            sendMessage({ 
-                              command: "speak", 
-                              payload: text,
-                              continue_previous_topic: continuePreviousTopic
-                            });
-                            setLog((prev) => [...prev, `[${getTimestamp()}] Sent: ${text} ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`]);
-                            setInputText("");
+                          }}
+                          style={{ fontSize: '0.95rem', minWidth: '120px' }}
+                        >
+                          🔊 Speak
+                        </button>
+                        <button
+                          className={`btn btn-clean btn-lg ${automationEnabled ? 'btn-danger' : 'btn-success'}`}
+                          onClick={() => {
+                            setAutomationEnabled(enabled => {
+                              const next = !enabled;
+                              console.log("Toggling automation from", enabled, "to", next);
+                              
+                              if (window.autoSendTimers) {
+                                window.autoSendTimers.forEach(timer => clearTimeout(timer));
+                                window.autoSendTimers = [];
+                              }
+                              setAutoSendCountdown(0);
+                              
+                              wsRef.current?.send(JSON.stringify({
+                                command: next ? 'startAutomation' : 'stopAutomation',
+                                payload: ""
+                              }))
+                              setLog((prev) => [...prev, `[${getTimestamp()}] Automation ${next ? 'ENABLED' : 'DISABLED'}`]);
+                              return next;
+                            })
+                          }}
+                          style={{ fontSize: '0.85rem', minWidth: '120px' }}
+                        >
+                          {automationEnabled ? '⏹️ Auto ON' : '▶️ Auto OFF'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mb-2">
+                    <label className="form-label text-muted mb-2" style={{ fontSize: '0.9rem', fontWeight: '600' }}>
+                      🎭 Simulate User Input (triggers AI response)
+                    </label>
+                    <div className="input-group">
+                      <textarea
+                        rows={2}
+                        className="form-control form-control-clean simulated-input-field"
+                        placeholder="Type what a user might say to trigger Temi's response..."
+                        value={simulatedUserInput}
+                        onChange={(e) => setSimulatedUserInput(e.target.value)}
+                        style={{ 
+                          fontSize: '1.0rem',
+                          lineHeight: '1.4',
+                          resize: 'vertical'
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendSimulatedUserInput();
                           }
                         }}
-                        style={{ fontSize: '0.95rem', minWidth: '120px' }}
-                      >
-                        🔊 Speak
-                      </button>
+                      />
                       <button
-                        className={`btn btn-clean btn-lg ${automationEnabled ? 'btn-danger' : 'btn-success'}`}
-                        onClick={() => {
-                          setAutomationEnabled(enabled => {
-                            const next = !enabled;
-                            console.log("Toggling automation from", enabled, "to", next);
-                            
-                            if (window.autoSendTimers) {
-                              window.autoSendTimers.forEach(timer => clearTimeout(timer));
-                              window.autoSendTimers = [];
-                            }
-                            setAutoSendCountdown(0);
-                            
-                            wsRef.current?.send(JSON.stringify({
-                              command: next ? 'startAutomation' : 'stopAutomation',
-                              payload: ""
-                            }))
-                            setLog((prev) => [...prev, `[${getTimestamp()}] Automation ${next ? 'ENABLED' : 'DISABLED'}`]);
-                            return next;
-                          })
-                        }}
-                        style={{ fontSize: '0.85rem', minWidth: '120px' }}
+                        className="btn btn-clean btn-outline-warning"
+                        disabled={!simulatedUserInput.trim()}
+                        onClick={sendSimulatedUserInput}
+                        style={{ fontSize: '0.9rem', minWidth: '100px' }}
                       >
-                        {automationEnabled ? '⏹️ Auto ON' : '▶️ Auto OFF'}
+                        🎭 Simulate
                       </button>
+                    </div>
+                    <div className="text-muted mt-1" style={{ fontSize: '0.8rem' }}>
+                      This simulates a user speaking to Temi and will generate an AI response in the field above
                     </div>
                   </div>
                 </div>
@@ -1260,7 +1269,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "turnBy", payload: "10" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ⬅️
+                    ⬅️ Left
                   </button>
                 </div>
                 <div className="col-3">
@@ -1271,7 +1280,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "skidJoy", payload: "(0.5, 0)" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ⬆️
+                    ⬆️ Forward
                   </button>
                 </div>
                 <div className="col-3">
@@ -1282,7 +1291,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "skidJoy", payload: "(-0.5, 0)" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ⬇️
+                    ⬇️ Backward
                   </button>
                 </div>
                 <div className="col-3">
@@ -1293,7 +1302,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "turnBy", payload: "-10" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ➡️
+                    ➡️ Right
                   </button>
                 </div>
               </div>
@@ -1304,7 +1313,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "tiltBy", payload: "5" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
-                    👆
+                    👆 Tilt Up
                   </button>
                 </div>
                 <div className="col-3">
@@ -1313,7 +1322,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "tiltBy", payload: "-5" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
-                    👇
+                    👇 Tilt Down
                   </button>
                 </div>
                 <div className="col-3">
@@ -1322,7 +1331,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "tiltAngle", payload: "0" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
-                    👀
+                    👀 Look Ahead
                   </button>
                 </div>
                 <div className="col-3">
@@ -1331,7 +1340,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "stopMovement", payload: "" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
-                    🛑
+                    🛑 Stop
                   </button>
                 </div>
               </div>
@@ -1346,7 +1355,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "navigateCamera", payload: "" })}
                     style={{ fontSize: '0.8rem', padding: '6px 8px' }}
                   >
-                    📷 Camera
+                    📷 Show Camera
                   </button>
                 </div>
                 <div className="col-6">
@@ -1355,7 +1364,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     onClick={() => sendMessage({ command: "displayFace", payload: "" })}
                     style={{ fontSize: '0.8rem', padding: '6px 8px' }}
                   >
-                    😊 Face
+                    😊 Show Face
                   </button>
                 </div>
               </div>
@@ -1370,7 +1379,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     }}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    📸 Pic
+                    📸 Take Pic
                   </button>
                 </div>
                 <div className="col-4">
@@ -1383,7 +1392,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     }}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    🎥 ▶️
+                    🎥 Start Video
                   </button>
                 </div>
                 <div className="col-4">
@@ -1396,7 +1405,7 @@ const handleSendToLLM = async (imageFilename, mode) => {
                     }}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ⏹️ Stop
+                    ⏹️ Stop Video
                   </button>
                 </div>
               </div>

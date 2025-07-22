@@ -114,8 +114,50 @@ class WebSocketServer:
         if 'command' not in msg_json:
             return
             
+        # NEW: SIMULATED USER INPUT COMMAND
+        if msg_json['command'] == 'simulateUserInput':
+            user_query = msg_json['payload']
+            continue_previous_topic = msg_json.get('continue_previous_topic', False)
+            
+            print(f"[DEBUG] Simulated user input received: '{user_query}'")
+            print(f"[DEBUG] Continue previous topic: {continue_previous_topic}")
+            
+            # Send simulated ASR result to control panel (mimic real speech-to-text)
+            simulated_asr = {
+                'type': 'asr_result',
+                'data': user_query,
+                'simulated': True  # Flag to indicate this was simulated
+            }
+            await self.send_message(PATH_CONTROL, simulated_asr)
+            
+            # Generate response using unified function (same as real speech)
+            img_path = None
+            if self.image_question_mode and self.latest_image and os.path.exists(self.latest_image):
+                img_path = self.latest_image
+                print(f'[INFO] Including image in simulated response (question mode active): {img_path}')
+
+            print(f"[DEBUG] Generating response for simulated input - Image: {img_path is not None}")
+            
+            # Generate AI response using the same logic as real speech
+            res = generate_response(user_query, img_path, continue_previous_topic)
+            
+            if res:
+                msg_2 = {
+                    'type': 'suggested_response',
+                    'data': res,
+                    'includes_image': img_path is not None,
+                    'image_path': img_path,
+                    'user_query': user_query,
+                    'image_question_mode': self.image_question_mode,
+                    'continue_previous_topic': continue_previous_topic,
+                    'simulated': True  # Flag to indicate this was from simulated input
+                }
+                await self.send_message(PATH_CONTROL, msg_2)
+            else:
+                print(f"[ERROR] Failed to generate response for simulated input: '{user_query}'")
+                
         # SESSION MANAGEMENT COMMANDS
-        if msg_json['command'] == 'start_family_session':
+        elif msg_json['command'] == 'start_family_session':
             family_id = msg_json.get('payload', {}).get('family_id', f"family_{len(os.listdir('sessions')) + 1}")
             session_id = start_new_session(family_id)
             
