@@ -4,7 +4,7 @@ import os
 from websockets.asyncio.server import serve
 from fastapi import WebSocketDisconnect
 import signal
-from llm_model import generate_response_with_session, start_new_session, end_current_session, get_current_session_messages
+from llm_model import generate_response, start_new_session, end_current_session, get_current_session_messages
 
 
 PATH_TEMI = '/temi'
@@ -162,10 +162,10 @@ class WebSocketServer:
                 img_path = self.latest_image
                 print(f'[INFO] Using image for response generation: {img_path}')
             
-            # Use session-aware response generation
-            res = generate_response_with_session(
-                user_input="Generate a response based on conversation context",
-                img_path=img_path
+            # Use unified function - it automatically handles session configuration
+            res = generate_response(
+            "Please generate a response based on our conversation so far",
+            img_path
             )
             
             if res:
@@ -243,17 +243,14 @@ class WebSocketServer:
             # Send ASR result to control panel
             await self.send_message(PATH_CONTROL, msg_json)
             
-            # Generate response using session-aware function
+            # Generate response using unified function
             img_path = None
             if self.image_question_mode and self.latest_image and os.path.exists(self.latest_image):
                 img_path = self.latest_image
                 print(f'[INFO] Including image in response (question mode active): {img_path}')
             
-            # This will automatically add user message and assistant response to current session
-            res = generate_response_with_session(
-                user_input=user_query,
-                img_path=img_path
-            )
+            # This will automatically use session configuration and add messages to session
+            res = generate_response(user_query, img_path)
             
             if res:
                 msg_2 = {

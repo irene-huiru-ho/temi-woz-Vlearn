@@ -1,5 +1,6 @@
 import os
 import shutil
+from typing import Optional
 import google.generativeai as genai
 import requests
 from PIL import Image, UnidentifiedImageError
@@ -32,6 +33,7 @@ UPLOAD_DIR = "participant_data/media"
 class AnalyzeRequest(BaseModel):
     image_filename: str
     mode: str
+    continue_previous_topic: Optional[bool] = False
 
 app.mount("/media", StaticFiles(directory=UPLOAD_DIR), name="media")
 
@@ -240,33 +242,49 @@ async def get_media_list():
 
 @app.post("/api/analyze-media")
 async def analyze_media(request: AnalyzeRequest):
-    file_path = os.path.join(UPLOAD_DIR, request.image_filename)
-
-    if not os.path.exists(file_path):
-        return JSONResponse(content={"success": False, "error": "File not found"}, status_code=404)
-
-    # Import the unified function
-    from llm_model import generate_response
-    
-    # Determine the query based on the request mode
-    if request.mode == "conversation":
-        query = "What learning opportunities do you see here? Let's talk about what we can explore together."
-    elif request.mode == "suggestion":
-        query = "What are some learning activities we could do based on what you see here?"
-    else:
-        query = "Tell me about what you observe here."
-
     try:
-        # Use the unified function - it will automatically use session configuration
-        result = generate_response(query, file_path)
-
+        # FIXED: Simplified request handling - assuming AnalyzeRequest is a Pydantic model
+        # Just access the attributes directly from the Pydantic model
+        image_filename = request.image_filename
+        mode = getattr(request, 'mode', 'default')
+        continue_previous_topic = getattr(request, 'continue_previous_topic', False)
+        
+        print(f"[DEBUG] Received request - Image: {image_filename}, Mode: {mode}, Continue: {continue_previous_topic}")
+        
+        file_path = os.path.join(UPLOAD_DIR, image_filename)
+        if not os.path.exists(file_path):
+            print(f"[ERROR] File not found: {file_path}")
+            return JSONResponse(content={"success": False, "error": "File not found"}, status_code=404)
+        
+        # Import the unified function
+        from llm_model import generate_response
+        
+        # Determine the query based on the request mode
+        if mode == "conversation":
+            query = "What learning opportunities do you see here? Let's talk about what we can explore together."
+        elif mode == "suggestion":
+            query = "What are some learning activities we could do based on what you see here?"
+        else:
+            query = "Tell me about what you observe here."
+        
+        print(f"[DEBUG] Image analysis - Mode: {mode}, Continue topic: {continue_previous_topic}")
+        print(f"[DEBUG] Query: {query}")
+        print(f"[DEBUG] File path: {file_path}")
+        
+        # FIXED: No 'await' - generate_response is synchronous
+        result = generate_response(query, file_path, continue_previous_topic)
+        
         if result:
+            print(f"[DEBUG] Generated result: {result[:100]}...")
             return {"success": True, "analysis": result}
         else:
+            print("[ERROR] generate_response returned empty/None result")
             return JSONResponse(content={"success": False, "error": "Failed to generate analysis"}, status_code=500)
-
+            
     except Exception as e:
         print(f'[ERROR] analyze_media: {e}')
+        import traceback
+        traceback.print_exc()  # This will show the exact line that failed
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
     
 

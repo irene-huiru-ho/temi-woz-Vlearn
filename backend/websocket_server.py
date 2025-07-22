@@ -145,6 +145,8 @@ class WebSocketServer:
         elif msg_json['command'] == 'speak':
             # Add assistant message to current session
             response_text = msg_json['payload']
+            continue_previous_topic = msg_json.get('continue_previous_topic', False)
+            print(f"[DEBUG] Speak command - Continue topic: {continue_previous_topic}")
             
             # This will automatically add to current session
             from llm_model import current_session
@@ -156,16 +158,21 @@ class WebSocketServer:
         elif msg_json['command'] == 'generate_response':
             payload = msg_json.get('payload', {})
             with_image = payload.get('with_image', False)
+            continue_previous_topic = payload.get('continue_previous_topic', False)
             
             img_path = None
             if with_image and self.latest_image and os.path.exists(self.latest_image):
                 img_path = self.latest_image
                 print(f'[INFO] Using image for response generation: {img_path}')
+
+            print(f"[DEBUG] Generate response - Image: {img_path is not None}, Continue topic: {continue_previous_topic}")
+
             
             # Use unified function - it automatically handles session configuration
             res = generate_response(
             "Please generate a response based on our conversation so far",
-            img_path
+            img_path,
+            continue_previous_topic
             )
             
             if res:
@@ -173,7 +180,8 @@ class WebSocketServer:
                     'type': 'suggested_response',
                     'data': res,
                     'includes_image': img_path is not None,
-                    'image_path': img_path
+                    'image_path': img_path,
+                    'continue_previous_topic': continue_previous_topic
                 }
                 await self.send_message(PATH_CONTROL, msg_2)
 
@@ -244,13 +252,18 @@ class WebSocketServer:
             await self.send_message(PATH_CONTROL, msg_json)
             
             # Generate response using unified function
+            # Default to prioritize current for direct speech (continue_previous_topic=False)
             img_path = None
             if self.image_question_mode and self.latest_image and os.path.exists(self.latest_image):
                 img_path = self.latest_image
                 print(f'[INFO] Including image in response (question mode active): {img_path}')
+
+            print(f"[DEBUG] ASR result - User: '{user_query}', Image: {img_path is not None}")
+
             
-            # This will automatically use session configuration and add messages to session
-            res = generate_response(user_query, img_path)
+            # For direct speech, default to prioritizing current input (continue_previous_topic=False)
+            # The wizard can override this with the toggle for subsequent responses
+            res = generate_response(user_query, img_path, continue_previous_topic=False)
             
             if res:
                 msg_2 = {
@@ -259,7 +272,8 @@ class WebSocketServer:
                     'includes_image': img_path is not None,
                     'image_path': img_path,
                     'user_query': user_query,
-                    'image_question_mode': self.image_question_mode
+                    'image_question_mode': self.image_question_mode,
+                    'continue_previous_topic': False # Default to False for direct speech
                 }
                 await self.send_message(PATH_CONTROL, msg_2)
         

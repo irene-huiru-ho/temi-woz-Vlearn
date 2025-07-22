@@ -243,7 +243,8 @@ def handle_session_command(command: str, family_id: str = None, **kwargs) -> Dic
 
 # === PROMPT GENERATION ===
 def create_dynamic_prompt(child_age: int, conversation_focus: str, custom_message: str, 
-                         is_first_message: bool = False, has_image: bool = False) -> str:
+                         is_first_message: bool = False, has_image: bool = False, 
+                         continue_previous_topic: bool = False) -> str:
     """Create a dynamic prompt based on session configuration."""
     
     # Age-appropriate guidance
@@ -289,6 +290,13 @@ def create_dynamic_prompt(child_age: int, conversation_focus: str, custom_messag
     if has_image:
         image_guidance = "You can see the scene in front of you right now. Reference what you observe naturally, as if you're experiencing it in real-time. Use phrases like 'I can see...', 'Right now there's...', 'I notice...' rather than 'In this picture...' or 'The image shows...'"
     
+    # Conversation mode guidance (NEW)
+    conversation_mode_guidance = ""
+    if continue_previous_topic:
+        conversation_mode_guidance = "CONVERSATION MODE: Continue and build upon the ongoing conversation. Reference and develop the topics you've been discussing together."
+    else:
+        conversation_mode_guidance = "CONVERSATION MODE: Respond primarily to the current input. Use previous conversation only as helpful reference or when directly asked about previous topics. Focus on what they're asking about right now."
+    
     # Custom message integration
     custom_guidance = ""
     if custom_message:
@@ -310,6 +318,8 @@ You are a friendly, conversational social robot that helps families learn togeth
 {focus_guidance.get(conversation_focus, focus_guidance['Open-ended'])}
 
 {image_guidance}
+
+{conversation_mode_guidance}
 
 **IMPORTANT RESPONSE GUIDELINES**
 - Keep responses natural, brief, and simple - avoid lengthy or complex responses
@@ -345,7 +355,7 @@ def format_conversation_for_gemini(all_messages: List[Dict]) -> str:
 
 
 # === UNIFIED RESPONSE GENERATION ===
-def generate_response(user_input: str, img_path: Optional[str] = None) -> str:
+def generate_response(user_input: str, img_path: Optional[str] = None, continue_previous_topic: bool = False) -> str:
     """SINGLE function that handles ALL conversation types with full session configuration."""
     global current_session
     
@@ -366,7 +376,8 @@ def generate_response(user_input: str, img_path: Optional[str] = None) -> str:
         current_session.conversation_focus,
         current_session.custom_message,
         is_first_message,
-        has_image
+        has_image,
+        continue_previous_topic
     )
     
     # Mark that we've had the first interaction
@@ -374,17 +385,40 @@ def generate_response(user_input: str, img_path: Optional[str] = None) -> str:
         current_session.is_first_message = False
     
     try:
-        # Format conversation history
-        conversation_history = format_conversation_for_gemini(current_session.messages)
+        # Format conversation history based on continue_previous_topic toggle
+        if continue_previous_topic:
+            # Use full conversation history for continuity
+            conversation_history = format_conversation_for_gemini(current_session.messages)
+            history_note = "Full conversation context for continuity"
+        else:
+            # Use recent context but keep full history available for reference
+            recent_messages = current_session.messages[-8:]  # Last 4 exchanges (user + assistant pairs)
+            conversation_history = format_conversation_for_gemini(recent_messages)
+            if len(current_session.messages) > 8:
+                history_note = f"Recent context (showing last {len(recent_messages)} of {len(current_session.messages)} messages)"
+            else:
+                history_note = "Complete conversation context"
         
-        # Create the full prompt
-        full_prompt = f"""
+        # Create the full prompt with appropriate context structure
+        if continue_previous_topic:
+            # Emphasize building on previous conversation
+            full_prompt = f"""
 {dynamic_prompt}
 
-Previous conversation:
+CONVERSATION CONTEXT (for continuity):
 {conversation_history}
 
-The latest USER input is: {user_input}
+Current input: {user_input}
+""".strip()
+        else:
+            # Prioritize current input while keeping history available
+            full_prompt = f"""
+{dynamic_prompt}
+
+Current input: {user_input}
+
+CONVERSATION REFERENCE ({history_note}):
+{conversation_history}
 """.strip()
         
         # Prepare content for Gemini
@@ -411,7 +445,8 @@ The latest USER input is: {user_input}
         
         if response.text:
             result = response.text.strip()
-            print(f'[INFO] Generated response (Age: {current_session.child_age}, Focus: {current_session.conversation_focus}, Image: {has_image}): {result[:50]}...')
+            mode_text = "Continue topic" if continue_previous_topic else "Prioritize current"
+            print(f'[INFO] Generated response (Age: {current_session.child_age}, Focus: {current_session.conversation_focus}, Image: {has_image}, Mode: {mode_text}): {result[:50]}...')
             
             # Add assistant response to session
             current_session.add_message('assistant', result)
@@ -426,12 +461,12 @@ The latest USER input is: {user_input}
 
 
 # === BACKWARD COMPATIBILITY WRAPPERS ===
-def generate_response_with_session(user_input: str, img_path: Optional[str] = None) -> str:
+def generate_response_with_session(user_input: str, img_path: Optional[str] = None, continue_previous_topic: bool = False) -> str:
     """Backward compatibility wrapper - routes to unified function."""
-    return generate_response(user_input, img_path)
+    return generate_response(user_input, img_path, continue_previous_topic)
 
 
-def generate_response_with_context(query: str, img_path: Optional[str] = None, conversation_context: Optional[str] = None) -> str:
+def generate_response_with_context(query: str, img_path: Optional[str] = None, conversation_context: Optional[str] = None, continue_previous_topic: bool = False) -> str:
     """Backward compatibility wrapper - routes to unified function."""
     # Note: conversation_context is ignored since we use session-based history now
-    return generate_response(query, img_path)
+    return generate_response(query, img_path, continue_previous_topic)

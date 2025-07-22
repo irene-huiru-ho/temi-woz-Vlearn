@@ -34,6 +34,7 @@ const WizardPage = () => {
   const [customMessage, setCustomMessage] = useState('');
   const [showConfig, setShowConfig] = useState(false);
   const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
+  const [continuePreviousTopic, setContinuePreviousTopic] = useState(false);
 
   const wsRef = useRef(null);
   const logEndRef = useRef(null);
@@ -320,8 +321,12 @@ const WizardPage = () => {
       const timer3 = setTimeout(() => {
         console.log("🔥 AUTO-SENDING NOW:", responseText);
         setAutoSendCountdown(0);
-        sendMessage({ command: "speak", payload: responseText });
-        setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AUTO-SENT: ${responseText}`]);
+        sendMessage({ 
+          command: "speak", 
+          payload: responseText,
+          continue_previous_topic: continuePreviousTopic
+        });
+        setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AUTO-SENT: ${responseText} ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`]);
         setInputText("");
       }, 3000);
       
@@ -331,37 +336,137 @@ const WizardPage = () => {
     }
   };
 
-  const handleSendToLLM = async (imageFilename, mode) => {
-    setActiveMediaContext({ filename: imageFilename, mode });
-    setLog((prev) => [
-      ...prev,
-      `[${getTimestamp()}] ${
-        mode === "conversation" ? "Started conversation" : "Suggested response"
-      } for "${imageFilename}"`,
-    ]);
-    console.log("Sending to /api/analyze-media:", {
-      image_filename: imageFilename,
-      mode: mode || "default",
-    });
-    try {
-      const res = await fetch("http://localhost:8000/api/analyze-media", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image_filename: imageFilename,
-          mode: mode || "default",
-        }),
-      });
-      console.log("Sending to LLM with mode:", mode);
-      const data = await res.json();
-      const llmOutput = data.analysis || "No response from LLM";
-      setLlmResponse(llmOutput);
-      setInputText(llmOutput);
-    } catch (error) {
-      setLlmResponse("Error contacting LLM.");
-      console.error(error);
-    }
+  // IMPROVED: Enhanced handleSendToLLM function with better error handling
+const handleSendToLLM = async (imageFilename, mode) => {
+  setActiveMediaContext({ filename: imageFilename, mode });
+  setLog((prev) => [
+    ...prev,
+    `[${getTimestamp()}] ${
+      mode === "conversation" ? "Started conversation" : "Suggested response"
+    } for "${imageFilename}" ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`,
+  ]);
+
+  const requestData = {
+    image_filename: imageFilename,
+    mode: mode || "default",
+    continue_previous_topic: continuePreviousTopic,
   };
+
+  console.log("Sending to /api/analyze-media:", requestData);
+  
+  try {
+    // Add loading state
+    setLog((prev) => [...prev, `[${getTimestamp()}] 🔄 Sending image to AI for analysis...`]);
+    
+    const res = await fetch("http://localhost:8000/api/analyze-media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestData),
+    });
+    
+    console.log("Response status:", res.status, res.statusText);
+    
+    if (!res.ok) {
+      // Handle different error status codes
+      let errorMessage = `Server error: ${res.status} ${res.statusText}`;
+      
+      try {
+        const errorData = await res.json();
+        errorMessage += ` - ${errorData.message || errorData.error || 'Unknown error'}`;
+        console.log("Error response data:", errorData);
+      } catch (parseError) {
+        console.log("Could not parse error response as JSON");
+        // Try to get text response for more details
+        try {
+          const errorText = await res.text();
+          if (errorText) {
+            errorMessage += ` - ${errorText.substring(0, 100)}`;
+            console.log("Error response text:", errorText);
+          }
+        } catch (textError) {
+          console.log("Could not get error response text");
+        }
+      }
+      
+      throw new Error(errorMessage);
+    }
+    
+    const data = await res.json();
+    console.log("Success response data:", data);
+    
+    const llmOutput = data.analysis || "No response from LLM";
+    setLlmResponse(llmOutput);
+    setInputText(llmOutput);
+    
+    setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AI analysis completed successfully`]);
+    
+  } catch (error) {
+    console.error("Error in handleSendToLLM:", error);
+    
+    // Provide user-friendly error messages based on error type
+    let userMessage = "Error contacting LLM: ";
+    
+    if (error.message.includes('fetch')) {
+      userMessage += "Cannot connect to server. Check if backend is running.";
+      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Connection Error: Backend server may be down`]);
+    } else if (error.message.includes('500')) {
+      userMessage += "Server internal error. Check backend logs for details.";
+      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Server Error (500): ${error.message}`]);
+    } else if (error.message.includes('404')) {
+      userMessage += "API endpoint not found. Check backend implementation.";
+      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ API Not Found (404): Check backend routes`]);
+    } else if (error.message.includes('timeout')) {
+      userMessage += "Request timed out. LLM processing may be slow.";
+      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Timeout Error: LLM processing took too long`]);
+    } else {
+      userMessage += error.message;
+      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Unexpected Error: ${error.message}`]);
+    }
+    
+    setLlmResponse(userMessage);
+    setInputText(""); // Don't populate input with error message
+    
+    // Add debugging information to log
+    setLog((prev) => [...prev, `[${getTimestamp()}] 🔍 Debug Info: Image="${imageFilename}", Mode="${mode}", ContinueTopic=${continuePreviousTopic}`]);
+    
+    // Suggest troubleshooting steps
+    setLog((prev) => [...prev, `[${getTimestamp()}] 💡 Troubleshooting: Check backend server, API implementation, and LLM configuration`]);
+  }
+};
+
+  // const handleSendToLLM = async (imageFilename, mode) => {
+  //   setActiveMediaContext({ filename: imageFilename, mode });
+  //   setLog((prev) => [
+  //     ...prev,
+  //     `[${getTimestamp()}] ${
+  //       mode === "conversation" ? "Started conversation" : "Suggested response"
+  //     } for "${imageFilename}" ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`,
+  //   ]);
+  //   console.log("Sending to /api/analyze-media:", {
+  //     image_filename: imageFilename,
+  //     mode: mode || "default",
+  //     continue_previous_topic: continuePreviousTopic,
+  //   });
+  //   try {
+  //     const res = await fetch("http://localhost:8000/api/analyze-media", {
+  //       method: "POST",
+  //       headers: { "Content-Type": "application/json" },
+  //       body: JSON.stringify({
+  //         image_filename: imageFilename,
+  //         mode: mode || "default",
+  //         continue_previous_topic: continuePreviousTopic,
+  //       }),
+  //     });
+  //     console.log("Sending to LLM with mode:", mode, "continue_previous_topic:", continuePreviousTopic);
+  //     const data = await res.json();
+  //     const llmOutput = data.analysis || "No response from LLM";
+  //     setLlmResponse(llmOutput);
+  //     setInputText(llmOutput);
+  //   } catch (error) {
+  //     setLlmResponse("Error contacting LLM.");
+  //     console.error(error);
+  //   }
+  // };
 
   const sendMessage = (message) => {
     sendMessageWS(message);
@@ -629,15 +734,20 @@ const WizardPage = () => {
             right: '15px',
             width: '320px',
             zIndex: 1040,
-            maxHeight: 'calc(100vh - 90px)',
-            overflowY: 'auto'
+            maxHeight: showControls ? 'calc(100vh - 260px)' : 'calc(100vh - 100px)',
+            overflowY: 'auto',
+            bottom: showControls ? '190px' : '20px',
+            transition: 'all 0.3s ease' // Smooth transition like main content
           }}
         >
           <div className="card card-clean shadow">
             <div className="card-header bg-warning text-dark" style={{ borderRadius: '12px 12px 0 0' }}>
               <h6 className="mb-0" style={{ fontWeight: '600' }}>📊 Research Session Control</h6>
             </div>
-            <div className="card-body p-3">
+            <div className="card-body p-3" style={{ 
+              maxHeight: showControls ? 'calc(100vh - 310px)' : 'calc(100vh - 160px)', 
+              overflowY: 'auto' 
+              }}>
               <div 
                 className={`p-2 mb-3 rounded ${sessionInfo.active ? 'session-status-active' : 'session-status-inactive'}`}
                 style={{ fontSize: '0.9rem', fontWeight: '600' }}
@@ -645,7 +755,7 @@ const WizardPage = () => {
                 {sessionInfo.active ? '🟢 ACTIVE SESSION' : '🔴 NO ACTIVE SESSION'}
               </div>
               
-              {/* NEW: Configuration Section - now available during both active and inactive sessions */}
+              {/* Configuration Section - now available during both active and inactive sessions */}
               <div className="mb-3">
                 <div className="d-flex justify-content-between align-items-center mb-2">
                   <h6 className="mb-0" style={{ fontSize: '0.9rem', fontWeight: '600' }}>
@@ -665,21 +775,45 @@ const WizardPage = () => {
                     {/* Child Age */}
                     <div className="mb-2">
                       <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
-                        Child Age: <span className="badge bg-primary">{childAge}</span>
+                        Child Age:
                       </label>
-                      <input
-                        type="range"
-                        className="form-range"
-                        min="1"
-                        max="15"
-                        value={childAge}
-                        onChange={(e) => setChildAge(parseInt(e.target.value))}
-                        style={{ height: '20px' }}
-                        disabled={isUpdatingConfig}
-                      />
-                      <div className="d-flex justify-content-between" style={{ fontSize: '0.65rem', color: '#666' }}>
-                        <span>1 year</span>
-                        <span>15 years</span>
+                      <div className="input-group input-group-sm">
+                        <button 
+                          className="btn btn-outline-secondary" 
+                          type="button"
+                          onClick={() => setChildAge(Math.max(1, childAge - 1))}
+                          disabled={isUpdatingConfig || childAge <= 1}
+                          style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                        >
+                          −
+                        </button>
+                        <input
+                          type="number"
+                          className="form-control text-center"
+                          value={childAge}
+                          onChange={(e) => {
+                            const age = parseInt(e.target.value) || 1;
+                            if (age >= 1 && age <= 15) {
+                              setChildAge(age);
+                            }
+                          }}
+                          min="1"
+                          max="15"
+                          disabled={isUpdatingConfig}
+                          style={{ fontSize: '0.8rem', maxWidth: '60px' }}
+                        />
+                        <button 
+                          className="btn btn-outline-secondary" 
+                          type="button"
+                          onClick={() => setChildAge(Math.min(15, childAge + 1))}
+                          disabled={isUpdatingConfig || childAge >= 15}
+                          style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                        >
+                          +
+                        </button>
+                      </div>
+                      <div className="text-muted" style={{ fontSize: '0.65rem' }}>
+                        Age range: 1-15 years
                       </div>
                     </div>
                     
@@ -720,6 +854,51 @@ const WizardPage = () => {
                       />
                     </div>
                     
+                    {/* Continue Previous Topic Toggle - Properly Contained */}
+                    <div className="mb-2">
+                      <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
+                        Conversation Mode:
+                      </label>
+                      <div 
+                        className="p-2" 
+                        style={{ 
+                          backgroundColor: '#f8f9fa', 
+                          borderRadius: '4px', 
+                          border: '1px solid #dee2e6',
+                          fontSize: '0.75rem'
+                        }}
+                      >
+                        <div className="form-check mb-0">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="continueTopicToggle"
+                            checked={continuePreviousTopic}
+                            onChange={(e) => setContinuePreviousTopic(e.target.checked)}
+                            disabled={isUpdatingConfig}
+                          />
+                          <label 
+                            className="form-check-label" 
+                            htmlFor="continueTopicToggle" 
+                            style={{ fontSize: '0.75rem', fontWeight: '500' }}
+                          >
+                            📜 Continue previous topic
+                          </label>
+                          <div 
+                            className="text-muted mt-1" 
+                            style={{ 
+                              fontSize: '0.65rem', 
+                              lineHeight: '1.2',
+                              paddingLeft: '24px'
+                            }}
+                          >
+                            {continuePreviousTopic ? "Build on conversation history" : "Prioritize current input/image"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    
                     {/* Action Button */}
                     {sessionInfo.active ? (
                       <button
@@ -740,7 +919,7 @@ const WizardPage = () => {
               </div>
               
               {sessionInfo.active ? (
-                <div>
+                <div className="mb-3">
                   <div className="mb-2" style={{ fontSize: '0.85rem' }}>
                     <strong>Family:</strong> {sessionInfo.family_id}<br/>
                     <strong>Duration:</strong> {getSessionDuration()}<br/>
@@ -754,14 +933,14 @@ const WizardPage = () => {
                       onClick={endFamilySession}
                       style={{ fontSize: '0.8rem' }}
                     >
-                      🔴 End Session
+                      🔴 End
                     </button>
                     <button
                       className="btn btn-clean btn-outline-primary btn-sm flex-fill"
                       onClick={downloadCurrentSession}
                       style={{ fontSize: '0.8rem' }}
                     >
-                      💾 Download
+                      💾 Save
                     </button>
                   </div>
                 </div>
@@ -946,8 +1125,12 @@ const WizardPage = () => {
                             }
                             setAutoSendCountdown(0);
                             
-                            sendMessage({ command: "speak", payload: text });
-                            setLog((prev) => [...prev, `[${getTimestamp()}] Sent: ${text}`]);
+                            sendMessage({ 
+                              command: "speak", 
+                              payload: text,
+                              continue_previous_topic: continuePreviousTopic
+                            });
+                            setLog((prev) => [...prev, `[${getTimestamp()}] Sent: ${text} ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`]);
                             setInputText("");
                           }
                         }}

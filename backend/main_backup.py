@@ -245,24 +245,20 @@ async def analyze_media(request: AnalyzeRequest):
     if not os.path.exists(file_path):
         return JSONResponse(content={"success": False, "error": "File not found"}, status_code=404)
 
-    # Import the session-aware function
-    from llm_model import generate_response_with_context
+    # Import the unified function
+    from llm_model import generate_response
     
     # Determine the query based on the request mode
     if request.mode == "conversation":
-        query = "What learning opportunities do you see in this picture? Keep it brief and friendly."
+        query = "What learning opportunities do you see here? Let's talk about what we can explore together."
     elif request.mode == "suggestion":
-        query = "Give 1-2 useful suggestions of what learning opportunities you see based on this image."
+        query = "What are some learning activities we could do based on what you see here?"
     else:
-        query = "Briefly describe what you see in this image."
+        query = "Tell me about what you observe here."
 
     try:
-        # Use the context-aware function (which will add to current session)
-        result = generate_response_with_context(
-            query=query,
-            img_path=file_path,
-            conversation_context=None
-        )
+        # Use the unified function - it will automatically use session configuration
+        result = generate_response(query, file_path)
 
         if result:
             return {"success": True, "analysis": result}
@@ -447,7 +443,7 @@ async def update_session_configuration_endpoint(request: Request):
         if custom_message:
             print(f"[DEBUG] Custom message: {custom_message}")
         
-        # Import the update function
+        # Use the unified function from llm_model
         from llm_model import update_session_configuration
         
         result = update_session_configuration(child_age, conversation_focus, custom_message)
