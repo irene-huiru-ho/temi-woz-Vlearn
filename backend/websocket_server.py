@@ -232,13 +232,35 @@ class WebSocketServer:
             media_path = os.path.join("participant_data/media", msg_json['payload'])
             if self._is_image_file(msg_json['payload']):
                 self.set_latest_image(media_path)
+                # ADD THIS: Notify frontend when image is displayed
+                print(f"🔍 BACKEND: Sending latest_image_updated for {msg_json['payload']}")
+                latest_image_msg = {
+                    'type': 'latest_image_updated',
+                    'data': {'filename': msg_json['payload']}
+                }
+                await self.send_message(PATH_CONTROL, latest_image_msg)
             await self.send_message(PATH_TEMI, msg_json)
 
         elif msg_json['command'] == 'displayFace':
             self.last_displayed = None
-            self.deactivate_image_question_mode()
+            # self.deactivate_image_question_mode()
             await self.send_message(PATH_TEMI, msg_json)
 
+        elif msg_json['command'] == 'listenNoImage':
+            self.reset_latest_image()
+            self.deactivate_image_question_mode()
+            await self.send_message(PATH_TEMI, msg_json)
+            # setLog(prev => [...prev, f"[{timestamp}] 🎧 Listen mode activated (no image)"])
+
+        elif msg_json['command'] == 'listenImage':  
+            if not self.latest_image or not os.path.exists(self.latest_image):
+                print(f"[ERROR] No valid image available for listenImage command: {self.latest_image}")
+                return
+            self.activate_image_question_mode()
+            msg_json['payload'] = self.latest_image  # Ensure payload is set to latest image
+            await self.send_message(PATH_TEMI, msg_json)    
+            # setLog(prev => [...prev, f"[{timestamp}] 🎧📷 Listen mode activated (with image: {self.latest_image})"])
+        
         elif msg_json['command'] in [
                 'skidJoy', 'takePicture', 'refreshScreenShot',
                 'tiltBy', 'tiltAngle', 'stopMovement', 'turnBy',
@@ -324,6 +346,9 @@ class WebSocketServer:
             if image_filename:
                 image_path = os.path.join("participant_data/media", image_filename)
                 self.set_latest_image(image_path)
+
+                # ADD THIS DEBUG PRINT
+                print(f"🔍 BACKEND: Sending picture_taken for {image_filename}")
                 
                 response_msg = {
                     'type': 'picture_taken',

@@ -24,6 +24,9 @@ const WizardPage = () => {
   // NEW: Simulated User Input State
   const [simulatedUserInput, setSimulatedUserInput] = useState("");
 
+  // NEW: Latest Image State
+  const [latestImage, setLatestImage] = useState("");
+
   // Session management state
   const [sessionInfo, setSessionInfo] = useState({ active: false });
   const [familyIdInput, setFamilyIdInput] = useState("");
@@ -449,11 +452,18 @@ const WizardPage = () => {
     }
   }, []);
 
+  // Add this near your other useEffects
+  useEffect(() => {
+    console.log('🎯 latestImage state changed from/to:', latestImage);
+  }, [latestImage]);
+
   useEffect(() => {
     localStorage.setItem("wizardMessageLog", JSON.stringify(log));
   }, [log]);
 
   const onWsMessage = (data) => {
+    // Log EVERY message that comes through
+    console.log('🔍 WebSocket message received:', data.type, data);
     console.log('onWsMessage received:', data)
     console.log('Current automation state:', automationEnabled)
     
@@ -507,6 +517,33 @@ const WizardPage = () => {
     } else if (data.type === "saved_locations") {
       const locationList = data.data;
       setSavedLocations(locationList);
+    } 
+    // NEW: Handle latest image updates
+    else if (data.type === 'picture_taken') {
+      const filename = data.data?.filename;
+      if (filename) {
+        setLatestImage(filename);
+        setLog((prev) => [...prev, `[${getTimestamp()}] 📸 Latest image updated: ${filename}`]);
+      }
+    } else if (data.type === 'initial_status') {
+      // Handle initial status when wizard connects
+      const statusData = data.data;
+      if (statusData.last_displayed) {
+        // Extract filename from path if it's a full path
+        const filename = typeof statusData.last_displayed === 'string' 
+          ? statusData.last_displayed.split('/').pop() 
+          : statusData.last_displayed;
+        setLatestImage(filename);
+      }
+    } 
+    else if (data.type === 'latest_image_updated') {
+      console.log('📺 Latest image updated handler called with:', data);
+      const filename = data.data?.filename;
+      if (filename) {
+        console.log('📺 Setting latestImage to:', filename);
+        setLatestImage(filename);
+        setLog((prev) => [...prev, `[${getTimestamp()}] 📺 Latest image updated (displayed): ${filename}`]);
+      }
     }
   };
 
@@ -642,6 +679,21 @@ const WizardPage = () => {
           .simulated-input-field:focus {
             border-color: #fd7e14;
             box-shadow: 0 0 0 0.2rem rgba(253, 126, 20, 0.15);
+          }
+
+          .listen-controls {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+          }
+
+          .latest-image-display {
+            font-size: 0.8rem;
+            color: #6c757d;
+            background-color: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
           }
         `}
       </style>
@@ -1035,6 +1087,34 @@ const WizardPage = () => {
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  {/* NEW: Listen Controls Section */}
+                  <div className="mb-2 listen-controls p-2">
+                    <div className="d-flex align-items-center gap-2 mb-1">
+                      <button
+                        className="btn btn-clean btn-outline-info btn-sm"
+                        onClick={() => sendMessage({ command: "listenNoImage", payload: "" })}
+                        style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+                      >
+                        🎧 Listen
+                      </button>
+                      <button
+                        className="btn btn-clean btn-outline-success btn-sm"
+                        onClick={() => sendMessage({ command: "listenImage", payload: "" })}
+                        style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+                      >
+                        🎧📷 Listen_image
+                      </button>
+                    </div>
+                    <div className="d-flex align-items-center justify-content-between">
+                      <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: '500' }}>
+                        Latest Image:
+                      </span>
+                      <div className="latest-image-display">
+                        {latestImage || 'None'}
+                      </div>
+                    </div>
                   </div>
 
                   {activeMediaContext && (
