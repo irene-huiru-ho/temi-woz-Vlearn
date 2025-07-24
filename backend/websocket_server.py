@@ -65,7 +65,7 @@ class WebSocketServer:
     def deactivate_image_question_mode(self):
         """Deactivate image question mode."""
         self.image_question_mode = False
-        self.reset_latest_image()
+        # self.reset_latest_image()
         print('[INFO] Image question mode deactivated, latest image reset')
 
     async def broadcast_to_all(self, message):
@@ -227,6 +227,7 @@ class WebSocketServer:
                 }
                 await self.send_message(PATH_CONTROL, msg_2)
 
+        
         elif msg_json['command'] == 'displayMedia':
             self.last_displayed = msg_json['payload']
             media_path = os.path.join("participant_data/media", msg_json['payload'])
@@ -247,8 +248,9 @@ class WebSocketServer:
             await self.send_message(PATH_TEMI, msg_json)
 
         elif msg_json['command'] == 'listenNoImage':
-            self.reset_latest_image()
-            self.deactivate_image_question_mode()
+            #self.reset_latest_image()
+            #self.deactivate_image_question_mode()
+            self.image_question_mode = False
             await self.send_message(PATH_TEMI, msg_json)
             # setLog(prev => [...prev, f"[{timestamp}] 🎧 Listen mode activated (no image)"])
 

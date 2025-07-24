@@ -452,18 +452,11 @@ const WizardPage = () => {
     }
   }, []);
 
-  // Add this near your other useEffects
-  useEffect(() => {
-    console.log('🎯 latestImage state changed from/to:', latestImage);
-  }, [latestImage]);
-
   useEffect(() => {
     localStorage.setItem("wizardMessageLog", JSON.stringify(log));
   }, [log]);
 
   const onWsMessage = (data) => {
-    // Log EVERY message that comes through
-    console.log('🔍 WebSocket message received:', data.type, data);
     console.log('onWsMessage received:', data)
     console.log('Current automation state:', automationEnabled)
     
@@ -534,15 +527,6 @@ const WizardPage = () => {
           ? statusData.last_displayed.split('/').pop() 
           : statusData.last_displayed;
         setLatestImage(filename);
-      }
-    } 
-    else if (data.type === 'latest_image_updated') {
-      console.log('📺 Latest image updated handler called with:', data);
-      const filename = data.data?.filename;
-      if (filename) {
-        console.log('📺 Setting latestImage to:', filename);
-        setLatestImage(filename);
-        setLog((prev) => [...prev, `[${getTimestamp()}] 📺 Latest image updated (displayed): ${filename}`]);
       }
     }
   };
@@ -1091,7 +1075,7 @@ const WizardPage = () => {
 
                   {/* NEW: Listen Controls Section */}
                   <div className="mb-2 listen-controls p-2">
-                    <div className="d-flex align-items-center gap-2 mb-1">
+                    <div className="d-flex align-items-center gap-2">
                       <button
                         className="btn btn-clean btn-outline-info btn-sm"
                         onClick={() => sendMessage({ command: "listenNoImage", payload: "" })}
@@ -1106,9 +1090,7 @@ const WizardPage = () => {
                       >
                         🎧📷 Listen_image
                       </button>
-                    </div>
-                    <div className="d-flex align-items-center justify-content-between">
-                      <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: '500' }}>
+                      <span className="text-muted ms-3" style={{ fontSize: '0.75rem', fontWeight: '500' }}>
                         Latest Image:
                       </span>
                       <div className="latest-image-display">
