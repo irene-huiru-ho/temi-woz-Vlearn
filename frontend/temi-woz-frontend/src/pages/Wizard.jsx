@@ -439,6 +439,7 @@ const WizardPage = () => {
   const sendMessage = (message) => {
     sendMessageWS(message);
     if (message.command === "displayMedia") {
+      setLatestImage(message.payload);
       setDisplayedMedia(message.payload);
     } else if (message.command === "displayFace") {
       setDisplayedMedia(null);
@@ -475,7 +476,7 @@ const WizardPage = () => {
       setLog((prev) => [...prev, `[${getTimestamp()}] AI Response: ${responseText}`]);
       setInputText(responseText);
       
-      console.log("🔥 Suggested response received! Automation enabled:", automationEnabled);
+      console.log("Suggested response received! Automation enabled:", automationEnabled);
       autoSendResponse(responseText);
         
     } else if (data.type === 'wizard_response') {
@@ -483,7 +484,7 @@ const WizardPage = () => {
       setLog((prev) => [...prev, `[${getTimestamp()}] AI Response (Image): ${responseText}`]);
       setInputText(responseText);
       
-      console.log("🔥 Wizard response received! Automation enabled:", automationEnabled);
+      console.log("Wizard response received! Automation enabled:", automationEnabled);
       autoSendResponse(responseText);
         
     } else if (data.type === 'media_uploaded') {
@@ -491,6 +492,7 @@ const WizardPage = () => {
 
       setUploadNotification(`Media uploaded: ${filename}`);
       setLatestUploadedFile(filename);
+      setLatestImage(filename);
 
       if (source === 'temi') {
         setTemiFiles(s => {
@@ -513,19 +515,25 @@ const WizardPage = () => {
     } 
     // NEW: Handle latest image updates
     else if (data.type === 'picture_taken') {
+      console.log('🔍 FRONTEND: picture_taken event received:', data);
       const filename = data.data?.filename;
       if (filename) {
+        console.log('🔍 FRONTEND: Setting latest image to:', filename);
         setLatestImage(filename);
         setLog((prev) => [...prev, `[${getTimestamp()}] 📸 Latest image updated: ${filename}`]);
       }
     } else if (data.type === 'initial_status') {
+      console.log('🔍 FRONTEND: initial_status event received:', data);
       // Handle initial status when wizard connects
       const statusData = data.data;
+
       if (statusData.last_displayed) {
         // Extract filename from path if it's a full path
         const filename = typeof statusData.last_displayed === 'string' 
           ? statusData.last_displayed.split('/').pop() 
           : statusData.last_displayed;
+
+        console.log('🔍 FRONTEND: Setting latest image from initial_status to:', filename);
         setLatestImage(filename);
       }
     }
@@ -799,7 +807,7 @@ const WizardPage = () => {
                           value={childAge}
                           onChange={(e) => {
                             const age = parseInt(e.target.value) || 1;
-                            if (age >= 1 && age <= 15) {
+                            if (age >= 1 && age <= 20) {
                               setChildAge(age);
                             }
                           }}
@@ -1093,7 +1101,7 @@ const WizardPage = () => {
                       <span className="text-muted ms-3" style={{ fontSize: '0.75rem', fontWeight: '500' }}>
                         Latest Image:
                       </span>
-                      <div className="latest-image-display">
+                      <div className="latest-image-display" key={latestImage}>
                         {latestImage || 'None'}
                       </div>
                     </div>

@@ -263,7 +263,7 @@ async def analyze_media(request: AnalyzeRequest):
         if mode == "conversation":
             query = "What learning opportunities do you see here? Let's talk about what we can explore together."
         elif mode == "suggestion":
-            query = "What are some learning activities we could do based on what you see here?"
+            query = "What are some learning activities we could do based on what you see here? Provide 1-2 suggestions. Talk as if you are reporting to a parent. Please do not include [child's name] in your response. Check whether the parent likes the suggestion. Please avoid spcial characters like asterisks, hashtags, etc. in your response."
         else:
             query = "Tell me about what you observe here."
         

@@ -293,12 +293,17 @@ class WebSocketServer:
             if msg_json.get('payload') == 'wizard':
                 from llm_model import get_session_info
                 session_info = get_session_info()
+
+                # Extract filename from latest_image path if it exists
+                latest_image_filename = None
+                if self.latest_image:
+                    latest_image_filename = os.path.basename(self.latest_image)
                 
                 msg = {
                     'type': 'initial_status',
                     'data': {
                         'behavior_mode': self.behavior_mode,
-                        'last_displayed': self.last_displayed,
+                        'last_displayed': latest_image_filename,
                         'current_session': session_info
                     }
                 }
