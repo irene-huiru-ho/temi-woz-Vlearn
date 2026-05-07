@@ -1,0 +1,72 @@
+{
+  "session_id": "48948138-765e-41fb-a398-20ba6bbae9d2",
+  "family_id": "family_20250721_211138",
+  "child_age": 5,
+  "conversation_focus": "Open-ended",
+  "custom_message": "",
+  "start_time": "2025-07-21T21:11:38.724128",
+  "end_time": "2025-07-21T21:15:27.081545",
+  "message_count": 11,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hi",
+      "timestamp": "2025-07-21T21:11:38.724193"
+    },
+    {
+      "role": "assistant",
+      "content": "Hi! I'm your robot friend. I'm happy to talk and play with you today. What do you want to talk about?",
+      "timestamp": "2025-07-21T21:11:39.372728"
+    },
+    {
+      "role": "assistant",
+      "content": "Hi! I'm your robot friend. I'm happy to talk and play with you today. What do you want to talk about?",
+      "timestamp": "2025-07-21T21:11:40.553623"
+    },
+    {
+      "role": "user",
+      "content": "i dont know",
+      "timestamp": "2025-07-21T21:11:50.492264"
+    },
+    {
+      "role": "assistant",
+      "content": "That's okay! Sometimes I don't know either. What are you thinking about right now?",
+      "timestamp": "2025-07-21T21:11:51.067846"
+    },
+    {
+      "role": "user",
+      "content": "hello",
+      "timestamp": "2025-07-21T21:13:29.381494"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! What are you doing today?",
+      "timestamp": "2025-07-21T21:13:29.903540"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! What are you doing today?",
+      "timestamp": "2025-07-21T21:13:31.623869"
+    },
+    {
+      "role": "user",
+      "content": "doing something fun",
+      "timestamp": "2025-07-21T21:13:40.418987"
+    },
+    {
+      "role": "assistant",
+      "content": "Fun is the best! What fun things do you like to do?",
+      "timestamp": "2025-07-21T21:13:41.139223"
+    },
+    {
+      "role": "assistant",
+      "content": "Fun is the best! What fun things do you like to do?",
+      "timestamp": "2025-07-21T21:13:42.206750"
+    }
+  ],
+  "metadata": {
+    "created_at": "2025-07-21T21:15:27.082725",
+    "gemini_model": "gemini-2.0-flash-exp",
+    "family_info": ""
+  }
+}

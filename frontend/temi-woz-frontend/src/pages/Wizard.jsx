@@ -21,6 +21,27 @@ const WizardPage = () => {
   const [showControls, setShowControls] = useState(true);
   const [autoSendCountdown, setAutoSendCountdown] = useState(0);
 
+  // NEW: Simulated User Input State
+  const [simulatedUserInput, setSimulatedUserInput] = useState("");
+
+  // NEW: Latest Image State
+  const [latestImage, setLatestImage] = useState("");
+
+  // Session management state
+  const [sessionInfo, setSessionInfo] = useState({ active: false });
+  const [familyIdInput, setFamilyIdInput] = useState("");
+  const [sessionStartTime, setSessionStartTime] = useState(null);
+  const [showSessionPanel, setShowSessionPanel] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // Prompt configuration state
+  const [childAge, setChildAge] = useState(5);
+  const [conversationFocus, setConversationFocus] = useState('Open-ended');
+  const [customMessage, setCustomMessage] = useState('');
+  const [showConfig, setShowConfig] = useState(false);
+  const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
+  const [continuePreviousTopic, setContinuePreviousTopic] = useState(false);
+
   const wsRef = useRef(null);
   const logEndRef = useRef(null);
   const automationRef = useRef(automationEnabled);
@@ -44,6 +65,245 @@ const WizardPage = () => {
   useEffect(() => {
     console.log("Automation state changed to:", automationEnabled);
   }, [automationEnabled]);
+
+  // NEW: Send Simulated User Input Function
+  const sendSimulatedUserInput = () => {
+    const text = simulatedUserInput.trim();
+    if (!text) return;
+    
+    // Log the simulated input in the message log
+    setLog((prev) => [...prev, `[${getTimestamp()}] 🎭 Simulated User Input: ${text}`]);
+    
+    // Send the simulated input to the backend via WebSocket
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        command: "simulateUserInput",
+        payload: text,
+        continue_previous_topic: continuePreviousTopic
+      }));
+    } else {
+      setLog((prev) => [...prev, `[${getTimestamp()}] ❌ WebSocket not connected - cannot send simulated input`]);
+    }
+    
+    // Clear the input field
+    setSimulatedUserInput("");
+  };
+
+  // Session management functions
+  const refreshSessionStatus = async (isManual = false) => {
+    if (isManual) setIsRefreshing(true);
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/session/status');
+      const data = await response.json();
+      setSessionInfo(data);
+      
+      if (data.active && !sessionStartTime) {
+        setSessionStartTime(new Date(data.start_time));
+      } else if (!data.active) {
+        setSessionStartTime(null);
+      }
+      
+      if (isManual) {
+        setLog(prev => [...prev, `[${getTimestamp()}] 🔄 Status refreshed: ${data.active ? `${data.family_id} (${data.message_count} msgs)` : 'No active session'}`]);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching session status:', error);
+      if (isManual) {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to refresh status: ${error.message}`]);
+      }
+    } finally {
+      if (isManual) setIsRefreshing(false);
+    }
+  };
+
+  const startFamilySession = async () => {
+    const familyId = familyIdInput.trim() || `Family_${new Date().getHours()}${new Date().getMinutes()}`;
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/session/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          family_id: familyId,
+          child_age: childAge,
+          conversation_focus: conversationFocus,
+          custom_message: customMessage.trim()
+        })
+      });
+      
+      const data = await response.json();
+      if (data.status === 'success') {
+        setLog(prev => [...prev, `[${getTimestamp()}] 🟢 SESSION STARTED: ${data.family_id} (Age: ${childAge}, Focus: ${conversationFocus})`]);
+        setSessionStartTime(new Date());
+        setFamilyIdInput("");
+        
+        setSessionInfo({
+          active: true,
+          session_id: data.session_id,
+          family_id: data.family_id,
+          child_age: childAge,
+          conversation_focus: conversationFocus,
+          custom_message: customMessage.trim(),
+          message_count: 0,
+          start_time: new Date().toISOString()
+        });
+        
+        setTimeout(() => refreshSessionStatus(), 500);
+      } else {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to start session: ${data.message}`]);
+      }
+    } catch (error) {
+      setLog(prev => [...prev, `[${getTimestamp()}] ❌ Error starting session: ${error.message}`]);
+    }
+  };
+
+  const endFamilySession = async () => {
+    if (!window.confirm('End the current family session? This will save all conversation data and reset for the next family.')) {
+      return;
+    }
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/session/end', { method: 'POST' });
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setLog(prev => [...prev, `[${getTimestamp()}] 🔴 SESSION ENDED & SAVED: ${data.filepath}`]);
+        
+        const logContent = log.join("\n");
+        const logBlob = new Blob([logContent], { type: "text/plain;charset=utf-8" });
+        const logUrl = URL.createObjectURL(logBlob);
+        const logLink = document.createElement("a");
+        logLink.href = logUrl;
+        
+        const familyId = sessionInfo.family_id || 'unknown_family';
+        logLink.download = `wizard-log-${familyId}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+        logLink.click();
+        URL.revokeObjectURL(logUrl);
+        
+        setTimeout(() => {
+          setLog([]);
+          localStorage.removeItem("wizardMessageLog");
+        }, 2000);
+        
+        setSessionStartTime(null);
+        refreshSessionStatus();
+        
+        if (data.filepath) {
+          const filename = data.filepath.split('/').pop();
+          setTimeout(() => {
+            window.open(`http://localhost:8000/api/session/download-file/${filename}`);
+          }, 500);
+        }
+      } else {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to end session: ${data.message}`]);
+      }
+    } catch (error) {
+      setLog(prev => [...prev, `[${getTimestamp()}] ❌ Error ending session: ${error.message}`]);
+    }
+  };
+
+  const downloadCurrentSession = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/session/download', { method: 'POST' });
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        setLog(prev => [...prev, `[${getTimestamp()}] 💾 Session downloaded: ${data.filepath}`]);
+        const filename = data.filepath.split('/').pop();
+        window.open(`http://localhost:8000/api/session/download-file/${filename}`);
+      } else {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Download failed: ${data.message}`]);
+      }
+    } catch (error) {
+      setLog(prev => [...prev, `[${getTimestamp()}] ❌ Download error: ${error.message}`]);
+    }
+  };
+
+  const updateSessionConfig = async () => {
+    if (!sessionInfo.active) return;
+    
+    setIsUpdatingConfig(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/session/update-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          child_age: childAge,
+          conversation_focus: conversationFocus,
+          custom_message: customMessage.trim()
+        })
+      });
+      
+      const data = await response.json();
+      if (data.status === 'success') {
+        const changes = [];
+        if (sessionInfo.child_age !== childAge) changes.push(`Age ${sessionInfo.child_age}→${childAge}`);
+        if (sessionInfo.conversation_focus !== conversationFocus) changes.push(`Focus ${sessionInfo.conversation_focus}→${conversationFocus}`);
+        if (sessionInfo.custom_message !== customMessage.trim()) changes.push(`Notes updated`);
+        
+        setLog(prev => [...prev, `[${getTimestamp()}] 🔧 CONFIG UPDATED: ${changes.join(', ')}`]);
+        
+        setSessionInfo(prev => ({
+          ...prev,
+          child_age: childAge,
+          conversation_focus: conversationFocus,
+          custom_message: customMessage.trim()
+        }));
+        
+        setTimeout(() => refreshSessionStatus(), 300);
+      } else {
+        setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to update config: ${data.message}`]);
+      }
+    } catch (error) {
+      setLog(prev => [...prev, `[${getTimestamp()}] ❌ Error updating config: ${error.message}`]);
+    } finally {
+      setIsUpdatingConfig(false);
+    }
+  };
+
+  const getSessionDuration = () => {
+    if (!sessionStartTime) return "--";
+    const duration = Math.round((new Date() - sessionStartTime) / 60000);
+    return `${duration} min`;
+  };
+
+  const focusAreas = [
+    'Open-ended',
+    'Literacy and Communication', 
+    'STEM',
+    'Creativity',
+    'Emotional Intelligence',
+    'Physical Development',
+    'Social Skills',
+    'History'
+  ];
+
+  const focusDescriptions = {
+    'Open-ended': 'Mix of age-appropriate topics',
+    'Literacy and Communication': 'Words, letters, reading, writing, expressing ideas',
+    'STEM': 'Counting, how things work, building, scientific thinking',
+    'Creativity': 'Imagination, art, creative expression, design thinking',
+    'Emotional Intelligence': 'Feelings, emotions, character emotions',
+    'Physical Development': 'Movement, coordination, sports, healthy habits',
+    'Social Skills': 'Friendship, cooperation, sharing, community relationships',
+    'History': 'Historical facts and knowledge'
+  };
+
+  useEffect(() => {
+    refreshSessionStatus();
+    const interval = setInterval(refreshSessionStatus, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (sessionInfo.active) {
+      if (sessionInfo.child_age !== undefined) setChildAge(sessionInfo.child_age);
+      if (sessionInfo.conversation_focus) setConversationFocus(sessionInfo.conversation_focus);
+      if (sessionInfo.custom_message !== undefined) setCustomMessage(sessionInfo.custom_message || '');
+    }
+  }, [sessionInfo]);
 
   const autoSendResponse = (responseText) => {
     const currentAutomation = automationRef.current;
@@ -71,8 +331,12 @@ const WizardPage = () => {
       const timer3 = setTimeout(() => {
         console.log("🔥 AUTO-SENDING NOW:", responseText);
         setAutoSendCountdown(0);
-        sendMessage({ command: "speak", payload: responseText });
-        setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AUTO-SENT: ${responseText}`]);
+        sendMessage({ 
+          command: "speak", 
+          payload: responseText,
+          continue_previous_topic: continuePreviousTopic
+        });
+        setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AUTO-SENT: ${responseText} ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`]);
         setInputText("");
       }, 3000);
       
@@ -88,35 +352,94 @@ const WizardPage = () => {
       ...prev,
       `[${getTimestamp()}] ${
         mode === "conversation" ? "Started conversation" : "Suggested response"
-      } for "${imageFilename}"`,
+      } for "${imageFilename}" ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`,
     ]);
-    console.log("Sending to /api/analyze-media:", {
+
+    const requestData = {
       image_filename: imageFilename,
       mode: mode || "default",
-    });
+      continue_previous_topic: continuePreviousTopic,
+    };
+
+    console.log("Sending to /api/analyze-media:", requestData);
+    
     try {
+      setLog((prev) => [...prev, `[${getTimestamp()}] 🔄 Sending image to AI for analysis...`]);
+      
       const res = await fetch("http://localhost:8000/api/analyze-media", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image_filename: imageFilename,
-          mode: mode || "default",
-        }),
+        body: JSON.stringify(requestData),
       });
-      console.log("Sending to LLM with mode:", mode);
+      
+      console.log("Response status:", res.status, res.statusText);
+      
+      if (!res.ok) {
+        let errorMessage = `Server error: ${res.status} ${res.statusText}`;
+        
+        try {
+          const errorData = await res.json();
+          errorMessage += ` - ${errorData.message || errorData.error || 'Unknown error'}`;
+          console.log("Error response data:", errorData);
+        } catch (parseError) {
+          console.log("Could not parse error response as JSON");
+          try {
+            const errorText = await res.text();
+            if (errorText) {
+              errorMessage += ` - ${errorText.substring(0, 100)}`;
+              console.log("Error response text:", errorText);
+            }
+          } catch (textError) {
+            console.log("Could not get error response text");
+          }
+        }
+        
+        throw new Error(errorMessage);
+      }
+      
       const data = await res.json();
+      console.log("Success response data:", data);
+      
       const llmOutput = data.analysis || "No response from LLM";
       setLlmResponse(llmOutput);
       setInputText(llmOutput);
+      
+      setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AI analysis completed successfully`]);
+      
     } catch (error) {
-      setLlmResponse("Error contacting LLM.");
-      console.error(error);
+      console.error("Error in handleSendToLLM:", error);
+      
+      let userMessage = "Error contacting LLM: ";
+      
+      if (error.message.includes('fetch')) {
+        userMessage += "Cannot connect to server. Check if backend is running.";
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Connection Error: Backend server may be down`]);
+      } else if (error.message.includes('500')) {
+        userMessage += "Server internal error. Check backend logs for details.";
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Server Error (500): ${error.message}`]);
+      } else if (error.message.includes('404')) {
+        userMessage += "API endpoint not found. Check backend implementation.";
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ API Not Found (404): Check backend routes`]);
+      } else if (error.message.includes('timeout')) {
+        userMessage += "Request timed out. LLM processing may be slow.";
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Timeout Error: LLM processing took too long`]);
+      } else {
+        userMessage += error.message;
+        setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Unexpected Error: ${error.message}`]);
+      }
+      
+      setLlmResponse(userMessage);
+      setInputText("");
+      
+      setLog((prev) => [...prev, `[${getTimestamp()}] 🔍 Debug Info: Image="${imageFilename}", Mode="${mode}", ContinueTopic=${continuePreviousTopic}`]);
+      setLog((prev) => [...prev, `[${getTimestamp()}] 💡 Troubleshooting: Check backend server, API implementation, and LLM configuration`]);
     }
   };
 
   const sendMessage = (message) => {
     sendMessageWS(message);
     if (message.command === "displayMedia") {
+      setLatestImage(message.payload);
       setDisplayedMedia(message.payload);
     } else if (message.command === "displayFace") {
       setDisplayedMedia(null);
@@ -138,7 +461,13 @@ const WizardPage = () => {
     console.log('onWsMessage received:', data)
     console.log('Current automation state:', automationEnabled)
     
-    if (data.type === 'asr_result') {
+    if (data.type === 'session_started') {
+      setLog((prev) => [...prev, `[${getTimestamp()}] 🟢 New session started: ${data.family_id}`]);
+      refreshSessionStatus();
+    } else if (data.type === 'session_ended') {
+      setLog((prev) => [...prev, `[${getTimestamp()}] 🔴 Session ended: ${data.filepath}`]);
+      refreshSessionStatus();
+    } else if (data.type === 'asr_result') {
       setLog((prev) => [...prev, `[${getTimestamp()}] Received: ${data.data}`]);
     } else if (data.type === 'assistant_response') {
       setLog((prev) => [...prev, `[${getTimestamp()}] Temi: ${data.data}`]);
@@ -147,7 +476,7 @@ const WizardPage = () => {
       setLog((prev) => [...prev, `[${getTimestamp()}] AI Response: ${responseText}`]);
       setInputText(responseText);
       
-      console.log("🔥 Suggested response received! Automation enabled:", automationEnabled);
+      console.log("Suggested response received! Automation enabled:", automationEnabled);
       autoSendResponse(responseText);
         
     } else if (data.type === 'wizard_response') {
@@ -155,7 +484,7 @@ const WizardPage = () => {
       setLog((prev) => [...prev, `[${getTimestamp()}] AI Response (Image): ${responseText}`]);
       setInputText(responseText);
       
-      console.log("🔥 Wizard response received! Automation enabled:", automationEnabled);
+      console.log("Wizard response received! Automation enabled:", automationEnabled);
       autoSendResponse(responseText);
         
     } else if (data.type === 'media_uploaded') {
@@ -163,6 +492,7 @@ const WizardPage = () => {
 
       setUploadNotification(`Media uploaded: ${filename}`);
       setLatestUploadedFile(filename);
+      setLatestImage(filename);
 
       if (source === 'temi') {
         setTemiFiles(s => {
@@ -182,6 +512,30 @@ const WizardPage = () => {
     } else if (data.type === "saved_locations") {
       const locationList = data.data;
       setSavedLocations(locationList);
+    } 
+    // NEW: Handle latest image updates
+    else if (data.type === 'picture_taken') {
+      console.log('🔍 FRONTEND: picture_taken event received:', data);
+      const filename = data.data?.filename;
+      if (filename) {
+        console.log('🔍 FRONTEND: Setting latest image to:', filename);
+        setLatestImage(filename);
+        setLog((prev) => [...prev, `[${getTimestamp()}] 📸 Latest image updated: ${filename}`]);
+      }
+    } else if (data.type === 'initial_status') {
+      console.log('🔍 FRONTEND: initial_status event received:', data);
+      // Handle initial status when wizard connects
+      const statusData = data.data;
+
+      if (statusData.last_displayed) {
+        // Extract filename from path if it's a full path
+        const filename = typeof statusData.last_displayed === 'string' 
+          ? statusData.last_displayed.split('/').pop() 
+          : statusData.last_displayed;
+
+        console.log('🔍 FRONTEND: Setting latest image from initial_status to:', filename);
+        setLatestImage(filename);
+      }
     }
   };
 
@@ -296,6 +650,43 @@ const WizardPage = () => {
             border-top: 1px solid #dee2e6;
             box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
           }
+
+          .session-status-active {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+          }
+
+          .session-status-inactive {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+          }
+
+          .simulated-input-field {
+            background-color: #f8f9fa;
+            border-color: #6c757d;
+          }
+
+          .simulated-input-field:focus {
+            border-color: #fd7e14;
+            box-shadow: 0 0 0 0.2rem rgba(253, 126, 20, 0.15);
+          }
+
+          .listen-controls {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+          }
+
+          .latest-image-display {
+            font-size: 0.8rem;
+            color: #6c757d;
+            background-color: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+          }
         `}
       </style>
 
@@ -303,8 +694,13 @@ const WizardPage = () => {
         <div className="d-flex justify-content-between align-items-center w-100 px-3">
           <span className="navbar-brand mb-0 h1" style={{ fontSize: '1.1rem', fontWeight: '600' }}>
             🤖 Wizard Control Dashboard
+            {sessionInfo.active && (
+              <span className="badge bg-success ms-2" style={{ fontSize: '0.8rem', borderRadius: '6px' }}>
+                {sessionInfo.family_id} • Age {sessionInfo.child_age || childAge} • {conversationFocus} • {getSessionDuration()} • {sessionInfo.message_count} msgs
+              </span>
+            )}
             {automationEnabled && (
-              <span className="badge bg-success ms-2" style={{ fontSize: '0.9rem', borderRadius: '6px' }}>
+              <span className="badge bg-info ms-2" style={{ fontSize: '0.9rem', borderRadius: '6px' }}>
                 {autoSendCountdown > 0 ? `AUTO ${autoSendCountdown}s` : 'AUTO ON'}
               </span>
             )}
@@ -314,12 +710,20 @@ const WizardPage = () => {
               </span>
             )}
           </span>
-          <button
-            className="btn btn-clean btn-outline-light btn-sm"
-            onClick={() => setShowControls(!showControls)}
-          >
-            {showControls ? "Hide Controls" : "Show Controls"}
-          </button>
+          <div className="d-flex gap-2">
+            <button
+              className="btn btn-clean btn-outline-light btn-sm"
+              onClick={() => setShowSessionPanel(!showSessionPanel)}
+            >
+              {showSessionPanel ? "Hide Session" : "Show Session"}
+            </button>
+            <button
+              className="btn btn-clean btn-outline-light btn-sm"
+              onClick={() => setShowControls(!showControls)}
+            >
+              {showControls ? "Hide Controls" : "Show Controls"}
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -338,14 +742,263 @@ const WizardPage = () => {
         </div>
       )}
 
+      {showSessionPanel && (
+        <div
+          className="position-fixed"
+          style={{
+            top: '70px',
+            right: '15px',
+            width: '320px',
+            zIndex: 1040,
+            maxHeight: showControls ? 'calc(100vh - 260px)' : 'calc(100vh - 100px)',
+            overflowY: 'auto',
+            bottom: showControls ? '190px' : '20px',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          <div className="card card-clean shadow">
+            <div className="card-header bg-warning text-dark" style={{ borderRadius: '12px 12px 0 0' }}>
+              <h6 className="mb-0" style={{ fontWeight: '600' }}>📊 Research Session Control</h6>
+            </div>
+            <div className="card-body p-3" style={{ 
+              maxHeight: showControls ? 'calc(100vh - 310px)' : 'calc(100vh - 160px)', 
+              overflowY: 'auto' 
+              }}>
+              <div 
+                className={`p-2 mb-3 rounded ${sessionInfo.active ? 'session-status-active' : 'session-status-inactive'}`}
+                style={{ fontSize: '0.9rem', fontWeight: '600' }}
+              >
+                {sessionInfo.active ? '🟢 ACTIVE SESSION' : '🔴 NO ACTIVE SESSION'}
+              </div>
+              
+              <div className="mb-3">
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <h6 className="mb-0" style={{ fontSize: '0.9rem', fontWeight: '600' }}>
+                    ⚙️ {sessionInfo.active ? 'Update Configuration' : 'Configuration'}
+                  </h6>
+                  <button
+                    className="btn btn-clean btn-outline-secondary btn-sm"
+                    onClick={() => setShowConfig(!showConfig)}
+                    style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+                  >
+                    {showConfig ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                
+                {showConfig && (
+                  <div className="border rounded p-2" style={{ fontSize: '0.8rem' }}>
+                    <div className="mb-2">
+                      <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
+                        Child Age:
+                      </label>
+                      <div className="input-group input-group-sm">
+                        <button 
+                          className="btn btn-outline-secondary" 
+                          type="button"
+                          onClick={() => setChildAge(Math.max(1, childAge - 1))}
+                          disabled={isUpdatingConfig || childAge <= 1}
+                          style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                        >
+                          −
+                        </button>
+                        <input
+                          type="number"
+                          className="form-control text-center"
+                          value={childAge}
+                          onChange={(e) => {
+                            const age = parseInt(e.target.value) || 1;
+                            if (age >= 1 && age <= 20) {
+                              setChildAge(age);
+                            }
+                          }}
+                          min="1"
+                          max="15"
+                          disabled={isUpdatingConfig}
+                          style={{ fontSize: '0.8rem', maxWidth: '60px' }}
+                        />
+                        <button 
+                          className="btn btn-outline-secondary" 
+                          type="button"
+                          onClick={() => setChildAge(Math.min(15, childAge + 1))}
+                          disabled={isUpdatingConfig || childAge >= 15}
+                          style={{ fontSize: '0.8rem', padding: '4px 8px' }}
+                        >
+                          +
+                        </button>
+                      </div>
+                      <div className="text-muted" style={{ fontSize: '0.65rem' }}>
+                        Age range: 1-15 years
+                      </div>
+                    </div>
+                    
+                    <div className="mb-2">
+                      <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
+                        Conversation Focus:
+                      </label>
+                      <select
+                        className="form-select form-select-sm"
+                        value={conversationFocus}
+                        onChange={(e) => setConversationFocus(e.target.value)}
+                        style={{ fontSize: '0.75rem' }}
+                        disabled={isUpdatingConfig}
+                      >
+                        {focusAreas.map(area => (
+                          <option key={area} value={area}>{area}</option>
+                        ))}
+                      </select>
+                      <div className="text-muted mt-1" style={{ fontSize: '0.65rem', lineHeight: '1.2' }}>
+                        {focusDescriptions[conversationFocus]}
+                      </div>
+                    </div>
+                    
+                    <div className="mb-2">
+                      <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
+                        Custom Notes (optional):
+                      </label>
+                      <textarea
+                        className="form-control form-control-sm"
+                        placeholder="Add family-specific context..."
+                        value={customMessage}
+                        onChange={(e) => setCustomMessage(e.target.value)}
+                        rows={2}
+                        style={{ fontSize: '0.7rem' }}
+                        disabled={isUpdatingConfig}
+                      />
+                    </div>
+                    
+                    <div className="mb-2">
+                      <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
+                        Conversation Mode:
+                      </label>
+                      <div 
+                        className="p-2" 
+                        style={{ 
+                          backgroundColor: '#f8f9fa', 
+                          borderRadius: '4px', 
+                          border: '1px solid #dee2e6',
+                          fontSize: '0.75rem'
+                        }}
+                      >
+                        <div className="form-check mb-0">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="continueTopicToggle"
+                            checked={continuePreviousTopic}
+                            onChange={(e) => setContinuePreviousTopic(e.target.checked)}
+                            disabled={isUpdatingConfig}
+                          />
+                          <label 
+                            className="form-check-label" 
+                            htmlFor="continueTopicToggle" 
+                            style={{ fontSize: '0.75rem', fontWeight: '500' }}
+                          >
+                            📜 Continue previous topic
+                          </label>
+                          <div 
+                            className="text-muted mt-1" 
+                            style={{ 
+                              fontSize: '0.65rem', 
+                              lineHeight: '1.2',
+                              paddingLeft: '24px'
+                            }}
+                          >
+                            {continuePreviousTopic ? "Build on conversation history" : "Prioritize current input/image"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {sessionInfo.active ? (
+                      <button
+                        className="btn btn-clean btn-warning btn-sm w-100"
+                        onClick={updateSessionConfig}
+                        disabled={isUpdatingConfig}
+                        style={{ fontSize: '0.75rem' }}
+                      >
+                        {isUpdatingConfig ? '🔧 Updating...' : '🔧 Update Configuration'}
+                      </button>
+                    ) : (
+                      <div className="text-muted text-center" style={{ fontSize: '0.7rem', padding: '8px' }}>
+                        Start session to apply configuration
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              {sessionInfo.active ? (
+                <div className="mb-3">
+                  <div className="mb-2" style={{ fontSize: '0.85rem' }}>
+                    <strong>Family:</strong> {sessionInfo.family_id}<br/>
+                    <strong>Duration:</strong> {getSessionDuration()}<br/>
+                    <strong>Messages:</strong> {sessionInfo.message_count}<br/>
+                    <strong>Age:</strong> {sessionInfo.child_age || childAge}<br/>
+                    <strong>Focus:</strong> {sessionInfo.conversation_focus || conversationFocus}
+                  </div>
+                  <div className="d-flex gap-2">
+                    <button
+                      className="btn btn-clean btn-danger btn-sm flex-fill"
+                      onClick={endFamilySession}
+                      style={{ fontSize: '0.8rem' }}
+                    >
+                      🔴 End
+                    </button>
+                    <button
+                      className="btn btn-clean btn-outline-primary btn-sm flex-fill"
+                      onClick={downloadCurrentSession}
+                      style={{ fontSize: '0.8rem' }}
+                    >
+                      💾 Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-2">
+                    <input
+                      type="text"
+                      className="form-control form-control-clean form-control-sm"
+                      placeholder="Family ID (e.g., F01, F02)"
+                      value={familyIdInput}
+                      onChange={(e) => setFamilyIdInput(e.target.value)}
+                      style={{ fontSize: '0.85rem' }}
+                    />
+                  </div>
+                  <button
+                    className="btn btn-clean btn-success btn-sm w-100"
+                    onClick={startFamilySession}
+                    style={{ fontSize: '0.85rem' }}
+                  >
+                    🟢 Start New Family Session
+                  </button>
+                </div>
+              )}
+              
+              <hr className="my-2" />
+              <button
+                className="btn btn-clean btn-outline-secondary btn-sm w-100"
+                onClick={() => refreshSessionStatus(true)}
+                disabled={isRefreshing}
+                style={{ fontSize: '0.8rem' }}
+              >
+                {isRefreshing ? '🔄 Refreshing...' : '🔄 Refresh Status'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div 
         className="container-fluid main-content" 
         style={{ 
           marginTop: '70px', 
           height: 'calc(100vh - 70px)',
+          paddingTop: '0',
           paddingBottom: showControls ? '200px' : '20px',
-          transition: 'padding-bottom 0.3s ease',
-          padding: '0 15px'
+          paddingLeft: '15px',
+          paddingRight: showSessionPanel ? '350px' : '15px',
+          transition: 'padding-bottom 0.3s ease'
         }}
       >
         <div className="row h-100">
@@ -356,13 +1009,14 @@ const WizardPage = () => {
               </div>
               <div className="card-body d-flex flex-column p-3" style={{ minHeight: 0, overflow: 'hidden' }}>
                 <div
-                  className="log-area p-3 mb-3 position-relative flex-grow-1"
+                  className="log-area p-3 mb-3 position-relative"
                   style={{ 
                     overflowY: "auto", 
                     fontSize: "0.95rem",
                     fontFamily: 'Monaco, "Lucida Console", monospace',
-                    minHeight: "400px",
-                    maxHeight: "none"
+                    minHeight: "200px",
+                    maxHeight: showControls ? "calc(100vh - 550px)" : "calc(100vh - 380px)",
+                    flex: "1 1 auto"
                   }}
                 >
                   {log.map((line, idx) => (
@@ -378,7 +1032,7 @@ const WizardPage = () => {
                   <div ref={logEndRef} />
                 </div>
 
-                <div className="mt-auto">
+                <div style={{ flexShrink: 0 }}>
                   <div className="d-flex gap-2 mb-2">
                     <button
                       className="btn btn-clean btn-outline-secondary btn-sm flex-fill"
@@ -427,6 +1081,32 @@ const WizardPage = () => {
                     </select>
                   </div>
 
+                  {/* NEW: Listen Controls Section */}
+                  <div className="mb-2 listen-controls p-2">
+                    <div className="d-flex align-items-center gap-2">
+                      <button
+                        className="btn btn-clean btn-outline-info btn-sm"
+                        onClick={() => sendMessage({ command: "listenNoImage", payload: "" })}
+                        style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+                      >
+                        🎧 Listen
+                      </button>
+                      <button
+                        className="btn btn-clean btn-outline-success btn-sm"
+                        onClick={() => sendMessage({ command: "listenImage", payload: "" })}
+                        style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+                      >
+                        🎧📷 Listen_image
+                      </button>
+                      <span className="text-muted ms-3" style={{ fontSize: '0.75rem', fontWeight: '500' }}>
+                        Latest Image:
+                      </span>
+                      <div className="latest-image-display" key={latestImage}>
+                        {latestImage || 'None'}
+                      </div>
+                    </div>
+                  </div>
+
                   {activeMediaContext && (
                     <div
                       className="alert alert-info py-1 px-3 mb-2"
@@ -455,66 +1135,113 @@ const WizardPage = () => {
                       <div className="small mt-1">Click "Speak" to cancel auto-send</div>
                     </div>
                   )}
-                  <div className="input-group">
-                    <textarea
-                      rows={3}
-                      className="form-control form-control-clean"
-                      placeholder="Enter text for robot to speak..."
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      style={{ 
-                        fontSize: '1.05rem',
-                        lineHeight: '1.4',
-                        resize: 'vertical'
-                      }}
-                    />
-                    <div className="d-flex flex-column gap-2 ms-2">
-                      <button
-                        className="btn btn-clean btn-primary btn-lg"
-                        disabled={!inputText.trim()}
-                        onClick={() => {
-                          const text = inputText.trim();
-                          if (text) {
-                            if (window.autoSendTimers) {
-                              window.autoSendTimers.forEach(timer => clearTimeout(timer));
-                              window.autoSendTimers = [];
+
+                  <div className="mb-3">
+                    <label className="form-label text-muted mb-2" style={{ fontSize: '0.9rem', fontWeight: '600' }}>
+                      🔊 Robot Speech Output (review/edit AI responses)
+                    </label>
+                    <div className="input-group">
+                      <textarea
+                        rows={3}
+                        className="form-control form-control-clean"
+                        placeholder="Enter text for robot to speak..."
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        style={{ 
+                          fontSize: '1.05rem',
+                          lineHeight: '1.4',
+                          resize: 'vertical'
+                        }}
+                      />
+                      <div className="d-flex flex-column gap-2 ms-2">
+                        <button
+                          className="btn btn-clean btn-primary btn-lg"
+                          disabled={!inputText.trim()}
+                          onClick={() => {
+                            const text = inputText.trim();
+                            if (text) {
+                              if (window.autoSendTimers) {
+                                window.autoSendTimers.forEach(timer => clearTimeout(timer));
+                                window.autoSendTimers = [];
+                              }
+                              setAutoSendCountdown(0);
+                              
+                              sendMessage({ 
+                                command: "speak", 
+                                payload: text,
+                                continue_previous_topic: continuePreviousTopic
+                              });
+                              setLog((prev) => [...prev, `[${getTimestamp()}] Sent: ${text} ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`]);
+                              setInputText("");
                             }
-                            setAutoSendCountdown(0);
-                            
-                            sendMessage({ command: "speak", payload: text });
-                            setLog((prev) => [...prev, `[${getTimestamp()}] Sent: ${text}`]);
-                            setInputText("");
+                          }}
+                          style={{ fontSize: '0.95rem', minWidth: '120px' }}
+                        >
+                          🔊 Speak
+                        </button>
+                        <button
+                          className={`btn btn-clean btn-lg ${automationEnabled ? 'btn-danger' : 'btn-success'}`}
+                          onClick={() => {
+                            setAutomationEnabled(enabled => {
+                              const next = !enabled;
+                              console.log("Toggling automation from", enabled, "to", next);
+                              
+                              if (window.autoSendTimers) {
+                                window.autoSendTimers.forEach(timer => clearTimeout(timer));
+                                window.autoSendTimers = [];
+                              }
+                              setAutoSendCountdown(0);
+                              
+                              wsRef.current?.send(JSON.stringify({
+                                command: next ? 'startAutomation' : 'stopAutomation',
+                                payload: ""
+                              }))
+                              setLog((prev) => [...prev, `[${getTimestamp()}] Automation ${next ? 'ENABLED' : 'DISABLED'}`]);
+                              return next;
+                            })
+                          }}
+                          style={{ fontSize: '0.85rem', minWidth: '120px' }}
+                        >
+                          {automationEnabled ? '⏹️ Auto ON' : '▶️ Auto OFF'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mb-2">
+                    <label className="form-label text-muted mb-2" style={{ fontSize: '0.9rem', fontWeight: '600' }}>
+                      🎭 Simulate User Input (triggers AI response)
+                    </label>
+                    <div className="input-group">
+                      <textarea
+                        rows={2}
+                        className="form-control form-control-clean simulated-input-field"
+                        placeholder="Type what a user might say to trigger Temi's response..."
+                        value={simulatedUserInput}
+                        onChange={(e) => setSimulatedUserInput(e.target.value)}
+                        style={{ 
+                          fontSize: '1.0rem',
+                          lineHeight: '1.4',
+                          resize: 'vertical'
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            sendSimulatedUserInput();
                           }
                         }}
-                        style={{ fontSize: '0.95rem', minWidth: '120px' }}
-                      >
-                        🔊 Speak
-                      </button>
+                      />
                       <button
-                        className={`btn btn-clean btn-lg ${automationEnabled ? 'btn-danger' : 'btn-success'}`}
-                        onClick={() => {
-                          setAutomationEnabled(enabled => {
-                            const next = !enabled;
-                            console.log("Toggling automation from", enabled, "to", next);
-                            
-                            if (window.autoSendTimers) {
-                              window.autoSendTimers.forEach(timer => clearTimeout(timer));
-                              window.autoSendTimers = [];
-                            }
-                            setAutoSendCountdown(0);
-                            
-                            wsRef.current?.send(JSON.stringify({
-                              command: next ? 'startAutomation' : 'stopAutomation',
-                              payload: ""
-                            }))
-                            setLog((prev) => [...prev, `[${getTimestamp()}] Automation ${next ? 'ENABLED' : 'DISABLED'}`]);
-                            return next;
-                          })
-                        }}
-                        style={{ fontSize: '0.85rem', minWidth: '120px' }}
+                        className="btn btn-clean btn-outline-warning"
+                        disabled={!simulatedUserInput.trim()}
+                        onClick={sendSimulatedUserInput}
+                        style={{ fontSize: '0.9rem', minWidth: '100px' }}
                       >
-                        {automationEnabled ? '⏹️ Auto ON' : '▶️ Auto OFF'}
+                        🎭 Simulate
                       </button>
+                    </div>
+                    <div className="text-muted mt-1" style={{ fontSize: '0.8rem' }}>
+                      This simulates a user speaking to Temi and will generate an AI response in the field above
                     </div>
                   </div>
                 </div>
@@ -612,7 +1339,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "turnBy", payload: "10" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ⬅️
+                    ⬅️ Left
                   </button>
                 </div>
                 <div className="col-3">
@@ -623,7 +1350,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "skidJoy", payload: "(0.5, 0)" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ⬆️
+                    ⬆️ Forward
                   </button>
                 </div>
                 <div className="col-3">
@@ -634,7 +1361,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "skidJoy", payload: "(-0.5, 0)" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ⬇️
+                    ⬇️ Backward
                   </button>
                 </div>
                 <div className="col-3">
@@ -645,7 +1372,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "turnBy", payload: "-10" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ➡️
+                    ➡️ Right
                   </button>
                 </div>
               </div>
@@ -656,7 +1383,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "tiltBy", payload: "5" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
-                    👆
+                    👆 Tilt Up
                   </button>
                 </div>
                 <div className="col-3">
@@ -665,7 +1392,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "tiltBy", payload: "-5" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
-                    👇
+                    👇 Tilt Down
                   </button>
                 </div>
                 <div className="col-3">
@@ -674,7 +1401,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "tiltAngle", payload: "0" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
-                    👀
+                    👀 Look Ahead
                   </button>
                 </div>
                 <div className="col-3">
@@ -683,7 +1410,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "stopMovement", payload: "" })}
                     style={{ fontSize: '0.7rem', padding: '4px 2px' }}
                   >
-                    🛑
+                    🛑 Stop
                   </button>
                 </div>
               </div>
@@ -698,7 +1425,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "navigateCamera", payload: "" })}
                     style={{ fontSize: '0.8rem', padding: '6px 8px' }}
                   >
-                    📷 Camera
+                    📷 Show Camera
                   </button>
                 </div>
                 <div className="col-6">
@@ -707,7 +1434,7 @@ const WizardPage = () => {
                     onClick={() => sendMessage({ command: "displayFace", payload: "" })}
                     style={{ fontSize: '0.8rem', padding: '6px 8px' }}
                   >
-                    😊 Face
+                    😊 Show Face
                   </button>
                 </div>
               </div>
@@ -722,7 +1449,7 @@ const WizardPage = () => {
                     }}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    📸 Pic
+                    📸 Take Pic
                   </button>
                 </div>
                 <div className="col-4">
@@ -735,7 +1462,7 @@ const WizardPage = () => {
                     }}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    🎥 ▶️
+                    🎥 Start Video
                   </button>
                 </div>
                 <div className="col-4">
@@ -748,7 +1475,7 @@ const WizardPage = () => {
                     }}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
-                    ⏹️ Stop
+                    ⏹️ Stop Video
                   </button>
                 </div>
               </div>

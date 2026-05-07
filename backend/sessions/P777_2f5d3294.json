@@ -1,0 +1,16 @@
+{
+  "session_id": "2f5d3294-9735-4a7d-ab27-9fd63b9c6054",
+  "family_id": "P777",
+  "child_age": 5,
+  "conversation_focus": "Open-ended",
+  "custom_message": "",
+  "start_time": "2025-07-23T23:04:27.756145",
+  "end_time": "2025-07-23T23:04:33.476726",
+  "message_count": 0,
+  "messages": [],
+  "metadata": {
+    "created_at": "2025-07-23T23:04:33.477469",
+    "gemini_model": "gemini-2.0-flash-exp",
+    "family_info": ""
+  }
+}
