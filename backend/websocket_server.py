@@ -241,6 +241,19 @@ class WebSocketServer:
                 }
                 await self.send_message(PATH_CONTROL, latest_image_msg)
             await self.send_message(PATH_TEMI, msg_json)
+            
+        #testing
+
+        elif msg_json['command'] == 'setLatestImage':
+            media_path = os.path.join("participant_data/media", msg_json['payload'])
+            if self._is_image_file(msg_json['payload']):
+                self.set_latest_image(media_path)
+                print(f"🔍 BACKEND: Explicitly setting latest image to {msg_json['payload']}")
+                latest_image_msg = {
+                    'type': 'latest_image_updated',
+                    'data': {'filename': msg_json['payload']}
+                }
+                await self.send_message(PATH_CONTROL, latest_image_msg)
 
         elif msg_json['command'] == 'displayFace':
             self.last_displayed = None
@@ -366,6 +379,14 @@ class WebSocketServer:
                     }
                 }
                 await self.send_message(PATH_CONTROL, response_msg)
+
+                #test for speech
+
+                # speak_msg = {
+                #     'command': 'speak',
+                #     'payload': 'picture taken'
+                # }
+                # awat self.send_message(PATH_TEMI, speak_msg)
 
         elif msg_json['type'] == 'start_image_questions':
             self.activate_image_question_mode()

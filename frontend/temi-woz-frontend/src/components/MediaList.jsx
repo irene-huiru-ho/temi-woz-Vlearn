@@ -5,6 +5,7 @@ export default function MediaList({
   newMediaFile,
   displayedMedia,
   handleSendToLLM,
+  handleSetLatestImage,
   temiFiles
 }) {
   const [files, setFiles] = useState([]);
@@ -263,6 +264,21 @@ export default function MediaList({
                         }}
                       >
                         Provide Suggestion
+                      </button>
+
+                      <button
+                        className="btn btn-sm btn-outline-info w-100"
+                        style={{ 
+                          fontSize: "0.75rem",
+                          padding: "4px 8px",
+                          borderRadius: "4px"
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSetLatestImage(filename);
+                        }}
+                      >
+                        Listen to Image
                       </button>
 
                       <button

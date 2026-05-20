@@ -333,6 +333,7 @@ You are a friendly, conversational social robot that helps families learn togeth
 - Please only ask one question at a time
 - Avoid repetitive phrase patterns like "Okay! Here's something:" - vary your conversation starters
 - Avoid sensitive topics, controversial subjects, or anything inappropriate for children
+# - Do NOT provide multiple options or "dual generation" responses. Provide exactly ONE single continuous response.
 
 {custom_guidance}
 
@@ -457,11 +458,11 @@ CONVERSATION REFERENCE ({history_note}):
             return result
         else:
             print('[WARNING] Empty response from Gemini')
-            return 'I apologize, but I need a moment to process that. Could you please try again?'
+            return "Oops, my circuits got a little mixed up! Could you try asking that again?"
             
     except Exception as e:
         print(f'[ERROR][generate_response]: {e}')
-        return 'I apologize, but I encountered an error processing your request. Please try again.'
+        return "Oops, let me think for a second! Could you say that one more time?"
 
 
 # === BACKWARD COMPATIBILITY WRAPPERS ===

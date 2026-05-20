@@ -346,6 +346,11 @@ const WizardPage = () => {
     }
   };
 
+  const handleSetLatestImage = (filename) => {
+    sendMessage({ command: "setLatestImage", payload: filename });
+    setLatestImage(filename);
+  };
+
   const handleSendToLLM = async (imageFilename, mode) => {
     setActiveMediaContext({ filename: imageFilename, mode });
     setLog((prev) => [
@@ -491,6 +496,9 @@ const WizardPage = () => {
       const { filename, source } = data;
 
       setUploadNotification(`Media uploaded: ${filename}`);
+      setTimeout(() => {
+          setUploadNotification(null);
+      }, 3000);
       setLatestUploadedFile(filename);
       setLatestImage(filename);
 
@@ -1277,6 +1285,7 @@ const WizardPage = () => {
                     newMediaFile={latestUploadedFile}
                     displayedMedia={displayedMedia}
                     handleSendToLLM={handleSendToLLM}
+                    handleSetLatestImage={handleSetLatestImage}
                     temiFiles={temiFiles}
                     className="h-100"
                   />
@@ -1419,6 +1428,7 @@ const WizardPage = () => {
             <div className="col-md-4">
               <h6 className="text-muted mb-2" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📱 Screen & Media</h6>
               <div className="row g-1">
+
                 <div className="col-6">
                   <button
                     className="btn btn-clean btn-outline-primary btn-sm w-100"
@@ -1428,6 +1438,7 @@ const WizardPage = () => {
                     📷 Show Camera
                   </button>
                 </div>
+
                 <div className="col-6">
                   <button
                     className="btn btn-clean btn-outline-primary btn-sm w-100"
@@ -1437,7 +1448,9 @@ const WizardPage = () => {
                     😊 Show Face
                   </button>
                 </div>
+
               </div>
+
               <div className="row g-1 mt-1">
                 <div className="col-4">
                   <button
@@ -1446,6 +1459,9 @@ const WizardPage = () => {
                     onClick={() => {
                       const customName = window.prompt("Enter a name for the picture:");
                       sendMessage({ command: "takePicture", payload: customName || "" });
+                      setTimeout(() => {
+                        sendMessage({ command: "displayFace", payload: "" });
+                      }, 10000);
                     }}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
