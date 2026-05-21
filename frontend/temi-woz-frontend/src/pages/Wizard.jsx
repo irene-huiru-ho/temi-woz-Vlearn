@@ -37,6 +37,7 @@ const WizardPage = () => {
   // Prompt configuration state
   const [childAge, setChildAge] = useState(5);
   const [conversationFocus, setConversationFocus] = useState('Open-ended');
+  const [safetyRiskLevel, setSafetyRiskLevel] = useState('Low');
   const [customMessage, setCustomMessage] = useState('');
   const [showConfig, setShowConfig] = useState(false);
   const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
@@ -129,6 +130,7 @@ const WizardPage = () => {
           family_id: familyId,
           child_age: childAge,
           conversation_focus: conversationFocus,
+          safety_risk_level: safetyRiskLevel,
           custom_message: customMessage.trim()
         })
       });
@@ -145,6 +147,7 @@ const WizardPage = () => {
           family_id: data.family_id,
           child_age: childAge,
           conversation_focus: conversationFocus,
+          safety_risk_level: safetyRiskLevel,
           custom_message: customMessage.trim(),
           message_count: 0,
           start_time: new Date().toISOString()
@@ -232,6 +235,7 @@ const WizardPage = () => {
         body: JSON.stringify({
           child_age: childAge,
           conversation_focus: conversationFocus,
+          safety_risk_level: safetyRiskLevel,
           custom_message: customMessage.trim()
         })
       });
@@ -241,6 +245,7 @@ const WizardPage = () => {
         const changes = [];
         if (sessionInfo.child_age !== childAge) changes.push(`Age ${sessionInfo.child_age}→${childAge}`);
         if (sessionInfo.conversation_focus !== conversationFocus) changes.push(`Focus ${sessionInfo.conversation_focus}→${conversationFocus}`);
+        if (sessionInfo.safety_risk_level !== safetyRiskLevel) changes.push(`Risk ${sessionInfo.safety_risk_level}→${safetyRiskLevel}`);
         if (sessionInfo.custom_message !== customMessage.trim()) changes.push(`Notes updated`);
         
         setLog(prev => [...prev, `[${getTimestamp()}] 🔧 CONFIG UPDATED: ${changes.join(', ')}`]);
@@ -249,6 +254,7 @@ const WizardPage = () => {
           ...prev,
           child_age: childAge,
           conversation_focus: conversationFocus,
+          safety_risk_level: safetyRiskLevel,
           custom_message: customMessage.trim()
         }));
         
@@ -301,6 +307,7 @@ const WizardPage = () => {
     if (sessionInfo.active) {
       if (sessionInfo.child_age !== undefined) setChildAge(sessionInfo.child_age);
       if (sessionInfo.conversation_focus) setConversationFocus(sessionInfo.conversation_focus);
+      if (sessionInfo.safety_risk_level) setSafetyRiskLevel(sessionInfo.safety_risk_level);
       if (sessionInfo.custom_message !== undefined) setCustomMessage(sessionInfo.custom_message || '');
     }
   }, [sessionInfo]);
@@ -861,6 +868,23 @@ const WizardPage = () => {
                     
                     <div className="mb-2">
                       <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
+                        Safety Risk Level:
+                      </label>
+                      <select
+                        className="form-select form-select-sm"
+                        value={safetyRiskLevel}
+                        onChange={(e) => setSafetyRiskLevel(e.target.value)}
+                        style={{ fontSize: '0.75rem' }}
+                        disabled={isUpdatingConfig}
+                      >
+                        <option value="Low">Low Risk</option>
+                        <option value="Medium">Medium Risk</option>
+                        <option value="High">High Risk</option>
+                      </select>
+                    </div>
+
+                    <div className="mb-2">
+                      <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
                         Custom Notes (optional):
                       </label>
                       <textarea
@@ -942,7 +966,8 @@ const WizardPage = () => {
                     <strong>Duration:</strong> {getSessionDuration()}<br/>
                     <strong>Messages:</strong> {sessionInfo.message_count}<br/>
                     <strong>Age:</strong> {sessionInfo.child_age || childAge}<br/>
-                    <strong>Focus:</strong> {sessionInfo.conversation_focus || conversationFocus}
+                    <strong>Focus:</strong> {sessionInfo.conversation_focus || conversationFocus}<br/>
+                    <strong>Risk:</strong> {sessionInfo.safety_risk_level || safetyRiskLevel}
                   </div>
                   <div className="d-flex gap-2">
                     <button

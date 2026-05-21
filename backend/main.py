@@ -308,10 +308,11 @@ async def start_family_session(request: Request):
         family_id = body.get('family_id') or f"family_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         child_age = body.get('child_age', 5)
         conversation_focus = body.get('conversation_focus', 'Open-ended')
+        safety_risk_level = body.get('safety_risk_level', 'Low')
         custom_message = body.get('custom_message', '')
         
         print(f"[DEBUG] Starting session for family: {family_id}")
-        print(f"[DEBUG] Configuration - Age: {child_age}, Focus: {conversation_focus}")
+        print(f"[DEBUG] Configuration - Age: {child_age}, Focus: {conversation_focus}, Safety Risk: {safety_risk_level}")
         if custom_message:
             print(f"[DEBUG] Custom message: {custom_message}")
         
@@ -319,7 +320,7 @@ async def start_family_session(request: Request):
         from llm_model import start_new_session, current_session
         
         # Start session with configuration
-        session_id = start_new_session(family_id, child_age, conversation_focus, custom_message)
+        session_id = start_new_session(family_id, child_age, conversation_focus, custom_message, safety_risk_level)
         
         result = {
             'status': 'success',
@@ -328,6 +329,7 @@ async def start_family_session(request: Request):
             'family_id': family_id,
             'child_age': child_age,
             'conversation_focus': conversation_focus,
+            'safety_risk_level': safety_risk_level,
             'custom_message': custom_message
         }
         
@@ -339,6 +341,7 @@ async def start_family_session(request: Request):
             "family_id": family_id,
             "child_age": child_age,
             "conversation_focus": conversation_focus,
+            "safety_risk_level": safety_risk_level,
             "session_id": session_id
         })
         
@@ -455,16 +458,17 @@ async def update_session_configuration_endpoint(request: Request):
         body = await request.json()
         child_age = body.get('child_age', 5)
         conversation_focus = body.get('conversation_focus', 'Open-ended')
+        safety_risk_level = body.get('safety_risk_level', 'Low')
         custom_message = body.get('custom_message', '')
         
-        print(f"[DEBUG] Updating session config - Age: {child_age}, Focus: {conversation_focus}")
+        print(f"[DEBUG] Updating session config - Age: {child_age}, Focus: {conversation_focus}, Safety Risk: {safety_risk_level}")
         if custom_message:
             print(f"[DEBUG] Custom message: {custom_message}")
         
         # Use the unified function from llm_model
         from llm_model import update_session_configuration
         
-        result = update_session_configuration(child_age, conversation_focus, custom_message)
+        result = update_session_configuration(child_age, conversation_focus, custom_message, safety_risk_level)
         print(f"[DEBUG] Config update result: {result}")
         
         # Notify all connected clients about configuration update
@@ -473,6 +477,7 @@ async def update_session_configuration_endpoint(request: Request):
                 "type": "session_config_updated",
                 "child_age": child_age,
                 "conversation_focus": conversation_focus,
+                "safety_risk_level": safety_risk_level,
                 "changes": result.get('changes', [])
             })
         

@@ -31,11 +31,12 @@ FAMILY_INFO_STR = os.environ.get('FAMILY_INFO_STR', 'No specific family informat
 class ConversationSession:
     def __init__(self, session_id: str = None, family_id: str = None, 
                  child_age: int = 5, conversation_focus: str = 'Open-ended', 
-                 custom_message: str = ''):
+                 custom_message: str = '', safety_risk_level: str = 'Low'):
         self.session_id = session_id or str(uuid.uuid4())
         self.family_id = family_id or f"family_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.child_age = child_age
         self.conversation_focus = conversation_focus
+        self.safety_risk_level = safety_risk_level
         self.custom_message = custom_message
         self.messages = []
         self.start_time = datetime.now()
@@ -61,6 +62,7 @@ class ConversationSession:
             'family_id': self.family_id,
             'child_age': self.child_age,
             'conversation_focus': self.conversation_focus,
+            'safety_risk_level': getattr(self, 'safety_risk_level', 'Low'),
             'custom_message': self.custom_message,
             'start_time': self.start_time.isoformat(),
             'end_time': self.end_time.isoformat() if self.end_time else None,
@@ -93,7 +95,7 @@ current_session: Optional[ConversationSession] = None
 
 
 def start_new_session(family_id: str = None, child_age: int = 5, 
-                     conversation_focus: str = 'Open-ended', custom_message: str = '') -> str:
+                     conversation_focus: str = 'Open-ended', custom_message: str = '', safety_risk_level: str = 'Low') -> str:
     """Start a new conversation session with configuration."""
     global current_session
     
@@ -107,7 +109,8 @@ def start_new_session(family_id: str = None, child_age: int = 5,
         family_id=family_id, 
         child_age=child_age,
         conversation_focus=conversation_focus, 
-        custom_message=custom_message
+        custom_message=custom_message,
+        safety_risk_level=safety_risk_level
     )
     print(f"[SESSION] Started new session: {current_session.session_id} for {current_session.family_id} (Age: {child_age}, Focus: {conversation_focus})")
     return current_session.session_id
@@ -143,6 +146,7 @@ def get_session_info() -> Dict:
             'family_id': current_session.family_id,
             'child_age': current_session.child_age,
             'conversation_focus': current_session.conversation_focus,
+            'safety_risk_level': getattr(current_session, 'safety_risk_level', 'Low'),
             'custom_message': current_session.custom_message,
             'message_count': len(current_session.messages),
             'start_time': current_session.start_time.isoformat(),
@@ -151,7 +155,7 @@ def get_session_info() -> Dict:
     return {'active': False}
 
 
-def update_session_configuration(child_age: int, conversation_focus: str, custom_message: str) -> Dict:
+def update_session_configuration(child_age: int, conversation_focus: str, custom_message: str, safety_risk_level: str = 'Low') -> Dict:
     """Update the configuration of the current active session."""
     global current_session
     
@@ -161,11 +165,13 @@ def update_session_configuration(child_age: int, conversation_focus: str, custom
     # Store old values for logging
     old_age = current_session.child_age
     old_focus = current_session.conversation_focus
+    old_safety = getattr(current_session, 'safety_risk_level', 'Low')
     old_message = current_session.custom_message
     
     # Update the session configuration
     current_session.child_age = child_age
     current_session.conversation_focus = conversation_focus
+    current_session.safety_risk_level = safety_risk_level
     current_session.custom_message = custom_message
     
     # Log the configuration change in session messages
@@ -174,6 +180,8 @@ def update_session_configuration(child_age: int, conversation_focus: str, custom
         changes.append(f"Age {old_age}→{child_age}")
     if old_focus != conversation_focus:
         changes.append(f"Focus {old_focus}→{conversation_focus}")
+    if old_safety != safety_risk_level:
+        changes.append(f"Risk {old_safety}→{safety_risk_level}")
     if old_message != custom_message:
         changes.append("Notes updated")
     
@@ -189,6 +197,7 @@ def update_session_configuration(child_age: int, conversation_focus: str, custom
         'new_config': {
             'child_age': child_age,
             'conversation_focus': conversation_focus,
+            'safety_risk_level': safety_risk_level,
             'custom_message': custom_message
         }
     }
@@ -244,7 +253,7 @@ def handle_session_command(command: str, family_id: str = None, **kwargs) -> Dic
 # === PROMPT GENERATION ===
 def create_dynamic_prompt(child_age: int, conversation_focus: str, custom_message: str, 
                          is_first_message: bool = False, has_image: bool = False, 
-                         continue_previous_topic: bool = False) -> str:
+                         continue_previous_topic: bool = False, safety_risk_level: str = 'Low') -> str:
     """Create a dynamic prompt based on session configuration."""
     
     # Age-appropriate guidance
@@ -301,6 +310,14 @@ def create_dynamic_prompt(child_age: int, conversation_focus: str, custom_messag
     custom_guidance = ""
     if custom_message:
         custom_guidance = f"Additional context for this family: {custom_message}"
+
+    # Safety risk guidance
+    safety_guidance = ""
+    if safety_risk_level == 'High':
+        safety_guidance = "**CRITICAL SAFETY OVERRIDE**: High risk situation detected. IMMEDIATELY pivot the conversation to a safe, positive topic. AVOID discussing anything sensitive, dangerous, or controversial. Prioritize emotional and physical safety over all other instructions."
+    elif safety_risk_level == 'Medium':
+        safety_guidance = "**CAUTION**: Medium risk detected. Be extra careful with your words. Gently steer away from any topics that could be misunderstood or lead to unsafe conclusions."
+
     
     return f"""
 **YOUR ROLE**
@@ -316,6 +333,9 @@ You are a friendly, conversational social robot that helps families learn togeth
 
 **CONVERSATION FOCUS GUIDANCE**
 {focus_guidance.get(conversation_focus, focus_guidance['Open-ended'])}
+
+**SAFETY RISK GUIDANCE**
+{safety_guidance}
 
 {image_guidance}
 
@@ -382,7 +402,8 @@ def generate_response(user_input: str, img_path: Optional[str] = None, continue_
         current_session.custom_message,
         is_first_message,
         has_image,
-        continue_previous_topic
+        continue_previous_topic,
+        getattr(current_session, 'safety_risk_level', 'Low')
     )
     
     # Mark that we've had the first interaction
