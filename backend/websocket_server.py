@@ -83,8 +83,8 @@ class WebSocketServer:
             while True:
                 message = await websocket.receive_text()
                 print(message)
-                if message == '':
-                    pass
+                if not message:
+                    continue
                 if ws_path == PATH_TEMI:
                     await self.temi_handler(websocket, message)
                 elif ws_path == PATH_CONTROL:

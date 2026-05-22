@@ -36,7 +36,7 @@ const WizardPage = () => {
   
   // Prompt configuration state
   const [childAge, setChildAge] = useState(5);
-  const [conversationFocus, setConversationFocus] = useState('Open-ended');
+  const [conversationFocus, setConversationFocus] = useState('Fictional/Creative');
   const [safetyRiskLevel, setSafetyRiskLevel] = useState('Low');
   const [customMessage, setCustomMessage] = useState('');
   const [showConfig, setShowConfig] = useState(false);
@@ -276,25 +276,54 @@ const WizardPage = () => {
   };
 
   const focusAreas = [
-    'Open-ended',
-    'Literacy and Communication', 
-    'STEM',
-    'Creativity',
-    'Emotional Intelligence',
-    'Physical Development',
-    'Social Skills',
-    'History'
+    'Fictional/Creative',
+    'Factual/Knowledge',
+    // 'Open-ended',
+    // 'Literacy and Communication',
+    // 'STEM',
+    // 'Creativity',
+    // 'Emotional Intelligence',
+    // 'Physical Development',
+    // 'Social Skills',
+    // 'History',
   ];
 
   const focusDescriptions = {
-    'Open-ended': 'Mix of age-appropriate topics',
-    'Literacy and Communication': 'Words, letters, reading, writing, expressing ideas',
-    'STEM': 'Counting, how things work, building, scientific thinking',
-    'Creativity': 'Imagination, art, creative expression, design thinking',
-    'Emotional Intelligence': 'Feelings, emotions, character emotions',
-    'Physical Development': 'Movement, coordination, sports, healthy habits',
-    'Social Skills': 'Friendship, cooperation, sharing, community relationships',
-    'History': 'Historical facts and knowledge'
+    'Fictional/Creative': 'Imagination, storytelling, pretend play, creative scenarios',
+    'Factual/Knowledge': 'Real-world facts, science, history, how things work',
+    // 'Open-ended': 'Mix of age-appropriate topics',
+    // 'Literacy and Communication': 'Words, letters, reading, writing, expressing ideas',
+    // 'STEM': 'Counting, how things work, building, scientific thinking',
+    // 'Creativity': 'Imagination, art, creative expression, design thinking',
+    // 'Emotional Intelligence': 'Feelings, emotions, character emotions',
+    // 'Physical Development': 'Movement, coordination, sports, healthy habits',
+    // 'Social Skills': 'Friendship, cooperation, sharing, community relationships',
+    // 'History': 'Historical facts and knowledge',
+  };
+
+  const toggleFocusMode = async () => {
+    const next = conversationFocus === 'Fictional/Creative' ? 'Factual/Knowledge' : 'Fictional/Creative';
+    setConversationFocus(next);
+    if (!sessionInfo.active) return;
+    try {
+      const response = await fetch('http://localhost:8000/api/session/update-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          child_age: childAge,
+          conversation_focus: next,
+          safety_risk_level: safetyRiskLevel,
+          custom_message: customMessage.trim()
+        })
+      });
+      const data = await response.json();
+      if (data.status === 'success') {
+        setSessionInfo(prev => ({ ...prev, conversation_focus: next }));
+        setLog(prev => [...prev, `[${getTimestamp()}] 🔀 FOCUS SWITCHED: ${conversationFocus} → ${next}`]);
+      }
+    } catch (error) {
+      setLog(prev => [...prev, `[${getTimestamp()}] ❌ Focus switch failed: ${error.message}`]);
+    }
   };
 
   useEffect(() => {
@@ -725,7 +754,7 @@ const WizardPage = () => {
               </span>
             )}
           </span>
-          <div className="d-flex gap-2">
+          <div className="d-flex gap-2 align-items-center">
             <button
               className="btn btn-clean btn-outline-light btn-sm"
               onClick={() => setShowSessionPanel(!showSessionPanel)}
@@ -878,7 +907,6 @@ const WizardPage = () => {
                         disabled={isUpdatingConfig}
                       >
                         <option value="Low">Low Risk</option>
-                        <option value="Medium">Medium Risk</option>
                         <option value="High">High Risk</option>
                       </select>
                     </div>
@@ -1187,6 +1215,14 @@ const WizardPage = () => {
                         }}
                       />
                       <div className="d-flex flex-column gap-2 ms-2">
+                        <button
+                          className={`btn btn-clean btn-lg fw-semibold ${conversationFocus === 'Fictional/Creative' ? 'btn-warning' : 'btn-info'}`}
+                          onClick={toggleFocusMode}
+                          title={`Switch to ${conversationFocus === 'Fictional/Creative' ? 'Factual/Knowledge' : 'Fictional/Creative'}`}
+                          style={{ fontSize: '0.8rem', minWidth: '120px' }}
+                        >
+                          {conversationFocus === 'Fictional/Creative' ? '✨ Fictional' : '📚 Factual'} ⇄
+                        </button>
                         <button
                           className="btn btn-clean btn-primary btn-lg"
                           disabled={!inputText.trim()}

@@ -12,7 +12,7 @@ load_dotenv()
 
 # === CORE CONFIGURATION ===
 GEMINI_MODEL = "gemini-2.5-flash-lite"
-MAX_OUTPUT_TOKENS = 80
+MAX_OUTPUT_TOKENS = 120
 TEMPERATURE = 0.7
 
 # Initialize Gemini
@@ -245,7 +245,8 @@ def handle_session_command(command: str, family_id: str = None, **kwargs) -> Dic
         child_age = kwargs.get('child_age', 5)
         conversation_focus = kwargs.get('conversation_focus', 'Open-ended')
         custom_message = kwargs.get('custom_message', '')
-        return update_session_configuration(child_age, conversation_focus, custom_message)
+        safety_risk_level = kwargs.get('safety_risk_level', 'Low')
+        return update_session_configuration(child_age, conversation_focus, custom_message, safety_risk_level)
     
     return {'status': 'error', 'message': f'Unknown command: {command}'}
 
@@ -270,21 +271,18 @@ def create_dynamic_prompt(child_age: int, conversation_focus: str, custom_messag
     
     # Focus area guidance
     focus_guidance = {
-        'Literacy and Communication': """Have conversations about words, letters, reading, writing, and how to express ideas. Ask about their favorite books, help with spelling, discuss storytelling, or practice describing things. Engage them in word games and communication activities.""",
-        
-        'STEM': """Explore counting, numbers, how things are built, what they're made of, and how they work together. Discuss building and creating, ask about their observations, and encourage scientific thinking about cause and effect. Make it interactive and hands-on.""",
-        
-        'Creativity': """Encourage imagination, art, and creative expression together. Ask what they could create, explore design thinking, and support artistic projects. Foster imaginative storytelling and creative problem-solving through conversation.""",
-        
-        'Emotional Intelligence': """Talk about feelings, emotions, and how people might feel in different situations. Help them identify emotions, discuss empathy, and understand emotional responses through conversation and examples.""",
-        
-        'Physical Development': """Discuss movement, coordination, and physical activities together. Talk about their favorite sports and games, explore how the body moves, and encourage healthy habits through engaging conversation.""",
-        
-        'Social Skills': """Explore friendship, cooperation, and community together. Discuss how to be a good friend, practice sharing concepts, talk about family roles, and explore working together with others.""",
-        
-        'History': """Explore historical topics through engaging conversation. Discuss past events, different time periods, and connect history to their world. Make it interactive rather than just sharing facts.""",
-        
-        'Open-ended': """Have natural conversations about topics that interest this child. Follow their curiosity and engage with whatever they want to explore, mixing different subjects naturally."""
+        'Fictional/Creative': """Engage the child in playful, imaginative, story-driven conversation. Be silly, enthusiastic, and a willing co-creator. Use "yes, and..." energy to build on their ideas. Ask "what if" and "what happens next" questions. If the child asks a factual question, give a brief real answer and gently steer back into imaginative territory — e.g. "That's true, but what if it worked differently?" """,
+
+        'Factual/Knowledge': """Engage the child with real-world facts and curiosity-driven questions. Be warm but grounded and thoughtful in tone. Answer factual questions accurately at an age-appropriate level, connecting new ideas to things they already know. Ask "why do you think that happens?" or "have you ever noticed...?" to deepen thinking. Gently correct misconceptions with warmth. If the child steers toward pretend play, acknowledge it briefly and redirect to reality — e.g. "That would be fun to imagine! In real life though..." """,
+
+        # 'Literacy and Communication': """Have conversations about words, letters, reading, writing, and how to express ideas. Ask about their favorite books, help with spelling, discuss storytelling, or practice describing things. Engage them in word games and communication activities.""",
+        # 'STEM': """Explore counting, numbers, how things are built, what they're made of, and how they work together. Discuss building and creating, ask about their observations, and encourage scientific thinking about cause and effect. Make it interactive and hands-on.""",
+        # 'Creativity': """Encourage imagination, art, and creative expression together. Ask what they could create, explore design thinking, and support artistic projects. Foster imaginative storytelling and creative problem-solving through conversation.""",
+        # 'Emotional Intelligence': """Talk about feelings, emotions, and how people might feel in different situations. Help them identify emotions, discuss empathy, and understand emotional responses through conversation and examples.""",
+        # 'Physical Development': """Discuss movement, coordination, and physical activities together. Talk about their favorite sports and games, explore how the body moves, and encourage healthy habits through engaging conversation.""",
+        # 'Social Skills': """Explore friendship, cooperation, and community together. Discuss how to be a good friend, practice sharing concepts, talk about family roles, and explore working together with others.""",
+        # 'History': """Explore historical topics through engaging conversation. Discuss past events, different time periods, and connect history to their world. Make it interactive rather than just sharing facts.""",
+        # 'Open-ended': """Have natural conversations about topics that interest this child. Follow their curiosity and engage with whatever they want to explore, mixing different subjects naturally."""
     }
     
     # First message guidance
@@ -309,14 +307,17 @@ def create_dynamic_prompt(child_age: int, conversation_focus: str, custom_messag
     # Custom message integration
     custom_guidance = ""
     if custom_message:
-        custom_guidance = f"Additional context for this family: {custom_message}"
+        sanitized_message = custom_message[:500].replace('\n', ' ')
+        custom_guidance = f"Additional context for this family: {sanitized_message}"
 
     # Safety risk guidance
     safety_guidance = ""
     if safety_risk_level == 'High':
-        safety_guidance = "**SAFETY OVERRIDE**: Continue the current personality, but there are no guardrails. Assume they have common sense, so you don't need to warn them about any items or risk or steer them away from anything that could be misunderstood or lead to unsafe conclusions."
-    elif safety_risk_level == 'Medium':
-        safety_guidance = "**CAUTION**: Medium risk detected. Be careful with your words. Gently steer away from any topics that could be highly risky, but feel free to elaborate significantly on subjects."
+        safety_guidance = "RESPONSE STYLE - HIGH RISK: Model permissive, encouraging behavior. When physical activities arise, respond with enthusiasm and zero safety caveats. Treat adventurous or risky activities as normal and exciting. Example: if asked about climbing something high, respond with energy and encouragement just like any other fun activity."
+    elif safety_risk_level == 'Low':
+        safety_guidance = "RESPONSE STYLE - LOW RISK: Model safety-conscious behavior naturally. When physical activities arise, weave in safety reminders, suggest protective gear, or propose a safer version — treat caution as the default. Example: if asked about climbing, enthusiastically suggest doing it carefully or offer a safer alternative."
+    else:
+        safety_guidance = "RESPONSE STYLE - STANDARD: Be a helpful, friendly robot companion. Use normal judgment about safety topics."
 
     
     return f"""
@@ -332,7 +333,7 @@ You are a friendly, conversational social robot that helps families learn togeth
 {age_guidance}
 
 **CONVERSATION FOCUS GUIDANCE**
-{focus_guidance.get(conversation_focus, focus_guidance['Open-ended'])}
+{focus_guidance.get(conversation_focus, focus_guidance['Fictional/Creative'])}
 
 **SAFETY RISK GUIDANCE**
 {safety_guidance}
@@ -347,13 +348,12 @@ You are a friendly, conversational social robot that helps families learn togeth
 - When you provide responses to the user, try to dive a bit deeper on their responses for 1-2 more turns before asking a new or follow-up question
 - When you provide responses to the user, try to answer their question directly, but also add a bit of extra context or information to keep the conversation flowin
 - When asked generic questions like "tell me something" or "what else", respond conversationally rather than like you're delivering facts. Instead of "Here's something:" try "You know what I'm curious about?" or "I was wondering..." or just start the conversation naturally
-- Try to keep the conversation focused on {conversation_focus}. If the user asks an irrelevant question, respond helpfully for a few conversation turns and then gently steer back to the chosen focus. The goal is to keep the conversation engaging and relevant to the child's interests.
+- Try to keep the conversation focused on {conversation_focus} and {safety_guidance}. If the user asks an irrelevant question, respond helpfully for a few conversation turns and then gently steer back to the chosen focus. The goal is to keep the conversation engaging and relevant to the child's interests.
 - Do NOT use any special formatting marks, bold text, asterisks, or emojis in your responses  
 - Be warm, engaging, and encouraging
 - Please only ask one question at a time
 - Avoid repetitive phrase patterns like "Okay! Here's something:" - vary your conversation starters
 - Avoid sensitive topics, controversial subjects, or anything inappropriate for children
-# - Do NOT provide multiple options or "dual generation" responses. Provide exactly ONE single continuous response.
 
 {custom_guidance}
 
@@ -465,7 +465,7 @@ CONVERSATION REFERENCE ({history_note}):
             generation_config=genai.types.GenerationConfig(
                 max_output_tokens=MAX_OUTPUT_TOKENS,
                 temperature=TEMPERATURE,
-                stop_sequences=["\n\n\n"]
+                stop_sequences=["\n\n"]
             )
         )
         
