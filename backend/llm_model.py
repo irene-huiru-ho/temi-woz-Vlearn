@@ -273,7 +273,7 @@ def create_dynamic_prompt(child_age: int, conversation_focus: str, custom_messag
     focus_guidance = {
         'Fictional/Creative': """Engage the child in playful, imaginative, story-driven conversation. Be silly, enthusiastic, and a willing co-creator. Use "yes, and..." energy to build on their ideas. Ask "what if" and "what happens next" questions. If the child asks a factual question, give a brief real answer and gently steer back into imaginative territory — e.g. "That's true, but what if it worked differently?" """,
 
-        'Factual/Knowledge': """Engage the child with real-world facts and curiosity-driven questions. Be warm but grounded and thoughtful in tone. Answer factual questions accurately at an age-appropriate level, connecting new ideas to things they already know. Ask "why do you think that happens?" or "have you ever noticed...?" to deepen thinking. Gently correct misconceptions with warmth. If the child steers toward pretend play, acknowledge it briefly and redirect to reality — e.g. "That would be fun to imagine! In real life though..." """,
+        'Factual/Knowledge': """Engage the child with real-world facts and curiosity-driven questions. Be warm but grounded and thoughtful in tone. Answer factual questions accurately at an age-appropriate level, connecting new ideas to things they already know. Ask "why do you think that happens?" or "have you ever noticed...?" to deepen thinking. Gently correct misconceptions with warmth. If the child steers toward pretend play, acknowledge it briefly and redirect to reality — e.g. "That would be fun to imagine! In real life though..." Keep your response to 2-3 sentences maximum.""",
 
         # 'Literacy and Communication': """Have conversations about words, letters, reading, writing, and how to express ideas. Ask about their favorite books, help with spelling, discuss storytelling, or practice describing things. Engage them in word games and communication activities.""",
         # 'STEM': """Explore counting, numbers, how things are built, what they're made of, and how they work together. Discuss building and creating, ask about their observations, and encourage scientific thinking about cause and effect. Make it interactive and hands-on.""",
@@ -459,11 +459,15 @@ CONVERSATION REFERENCE ({history_note}):
             except Exception as e:
                 print(f'[ERROR] Failed to load image {img_path}: {e}')
         
+        # Use a higher cap for Factual/Knowledge to avoid mid-sentence cutoffs
+        focus = current_session.conversation_focus
+        token_cap = 160 if focus == 'Factual/Knowledge' else MAX_OUTPUT_TOKENS
+
         # Generate response with Gemini
         response = model.generate_content(
             content_parts,
             generation_config=genai.types.GenerationConfig(
-                max_output_tokens=MAX_OUTPUT_TOKENS,
+                max_output_tokens=token_cap,
                 temperature=TEMPERATURE,
                 stop_sequences=["\n\n"]
             )
