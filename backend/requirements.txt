@@ -2,3 +2,6 @@ websockets
 python-dotenv
 openai==1.69.0
 fastapi[standard]
+google-generativeai
+ultralytics
+opencv-python-headless

@@ -26,6 +26,13 @@ const WizardPage = () => {
 
   // NEW: Latest Image State
   const [latestImage, setLatestImage] = useState("");
+  const [livePerception, setLivePerception] = useState({ image: null, detections: [] });
+  const [isPerceptionActive, setIsPerceptionActive] = useState(false);
+  const isPerceptionActiveRef = useRef(false);
+
+  useEffect(() => {
+    isPerceptionActiveRef.current = isPerceptionActive;
+  }, [isPerceptionActive]);
 
   // Session management state
   const [sessionInfo, setSessionInfo] = useState({ active: false });
@@ -33,7 +40,7 @@ const WizardPage = () => {
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [showSessionPanel, setShowSessionPanel] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
+
   // Prompt configuration state
   const [childAge, setChildAge] = useState(5);
   const [conversationFocus, setConversationFocus] = useState('Fictional/Creative');
@@ -71,10 +78,10 @@ const WizardPage = () => {
   const sendSimulatedUserInput = () => {
     const text = simulatedUserInput.trim();
     if (!text) return;
-    
+
     // Log the simulated input in the message log
     setLog((prev) => [...prev, `[${getTimestamp()}] 🎭 Simulated User Input: ${text}`]);
-    
+
     // Send the simulated input to the backend via WebSocket
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
@@ -85,7 +92,7 @@ const WizardPage = () => {
     } else {
       setLog((prev) => [...prev, `[${getTimestamp()}] ❌ WebSocket not connected - cannot send simulated input`]);
     }
-    
+
     // Clear the input field
     setSimulatedUserInput("");
   };
@@ -93,22 +100,22 @@ const WizardPage = () => {
   // Session management functions
   const refreshSessionStatus = async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
-    
+
     try {
       const response = await fetch('http://localhost:8000/api/session/status');
       const data = await response.json();
       setSessionInfo(data);
-      
+
       if (data.active && !sessionStartTime) {
         setSessionStartTime(new Date(data.start_time));
       } else if (!data.active) {
         setSessionStartTime(null);
       }
-      
+
       if (isManual) {
         setLog(prev => [...prev, `[${getTimestamp()}] 🔄 Status refreshed: ${data.active ? `${data.family_id} (${data.message_count} msgs)` : 'No active session'}`]);
       }
-      
+
     } catch (error) {
       console.error('Error fetching session status:', error);
       if (isManual) {
@@ -121,12 +128,12 @@ const WizardPage = () => {
 
   const startFamilySession = async () => {
     const familyId = familyIdInput.trim() || `Family_${new Date().getHours()}${new Date().getMinutes()}`;
-    
+
     try {
       const response = await fetch('http://localhost:8000/api/session/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           family_id: familyId,
           child_age: childAge,
           conversation_focus: conversationFocus,
@@ -134,13 +141,13 @@ const WizardPage = () => {
           custom_message: customMessage.trim()
         })
       });
-      
+
       const data = await response.json();
       if (data.status === 'success') {
         setLog(prev => [...prev, `[${getTimestamp()}] 🟢 SESSION STARTED: ${data.family_id} (Age: ${childAge}, Focus: ${conversationFocus})`]);
         setSessionStartTime(new Date());
         setFamilyIdInput("");
-        
+
         setSessionInfo({
           active: true,
           session_id: data.session_id,
@@ -152,7 +159,7 @@ const WizardPage = () => {
           message_count: 0,
           start_time: new Date().toISOString()
         });
-        
+
         setTimeout(() => refreshSessionStatus(), 500);
       } else {
         setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to start session: ${data.message}`]);
@@ -166,33 +173,33 @@ const WizardPage = () => {
     if (!window.confirm('End the current family session? This will save all conversation data and reset for the next family.')) {
       return;
     }
-    
+
     try {
       const response = await fetch('http://localhost:8000/api/session/end', { method: 'POST' });
       const data = await response.json();
-      
+
       if (data.status === 'success') {
         setLog(prev => [...prev, `[${getTimestamp()}] 🔴 SESSION ENDED & SAVED: ${data.filepath}`]);
-        
+
         const logContent = log.join("\n");
         const logBlob = new Blob([logContent], { type: "text/plain;charset=utf-8" });
         const logUrl = URL.createObjectURL(logBlob);
         const logLink = document.createElement("a");
         logLink.href = logUrl;
-        
+
         const familyId = sessionInfo.family_id || 'unknown_family';
         logLink.download = `wizard-log-${familyId}-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
         logLink.click();
         URL.revokeObjectURL(logUrl);
-        
+
         setTimeout(() => {
           setLog([]);
           localStorage.removeItem("wizardMessageLog");
         }, 2000);
-        
+
         setSessionStartTime(null);
         refreshSessionStatus();
-        
+
         if (data.filepath) {
           const filename = data.filepath.split('/').pop();
           setTimeout(() => {
@@ -211,7 +218,7 @@ const WizardPage = () => {
     try {
       const response = await fetch('http://localhost:8000/api/session/download', { method: 'POST' });
       const data = await response.json();
-      
+
       if (data.status === 'success') {
         setLog(prev => [...prev, `[${getTimestamp()}] 💾 Session downloaded: ${data.filepath}`]);
         const filename = data.filepath.split('/').pop();
@@ -226,7 +233,7 @@ const WizardPage = () => {
 
   const updateSessionConfig = async () => {
     if (!sessionInfo.active) return;
-    
+
     setIsUpdatingConfig(true);
     try {
       const response = await fetch('http://localhost:8000/api/session/update-config', {
@@ -239,7 +246,7 @@ const WizardPage = () => {
           custom_message: customMessage.trim()
         })
       });
-      
+
       const data = await response.json();
       if (data.status === 'success') {
         const changes = [];
@@ -247,9 +254,9 @@ const WizardPage = () => {
         if (sessionInfo.conversation_focus !== conversationFocus) changes.push(`Focus ${sessionInfo.conversation_focus}→${conversationFocus}`);
         if (sessionInfo.safety_risk_level !== safetyRiskLevel) changes.push(`Risk ${sessionInfo.safety_risk_level}→${safetyRiskLevel}`);
         if (sessionInfo.custom_message !== customMessage.trim()) changes.push(`Notes updated`);
-        
+
         setLog(prev => [...prev, `[${getTimestamp()}] 🔧 CONFIG UPDATED: ${changes.join(', ')}`]);
-        
+
         setSessionInfo(prev => ({
           ...prev,
           child_age: childAge,
@@ -257,7 +264,7 @@ const WizardPage = () => {
           safety_risk_level: safetyRiskLevel,
           custom_message: customMessage.trim()
         }));
-        
+
         setTimeout(() => refreshSessionStatus(), 300);
       } else {
         setLog(prev => [...prev, `[${getTimestamp()}] ❌ Failed to update config: ${data.message}`]);
@@ -345,37 +352,37 @@ const WizardPage = () => {
     const currentAutomation = automationRef.current;
     console.log("🔥 autoSendResponse called with:", responseText);
     console.log("🔥 Current automation state (ref):", currentAutomation);
-    
+
     if (currentAutomation && responseText.trim()) {
       setLog((prev) => [...prev, `[${getTimestamp()}] ⏰ AUTO-SEND starting 3-second countdown...`]);
       setAutoSendCountdown(3);
-      
+
       if (window.autoSendTimers) {
         window.autoSendTimers.forEach(timer => clearTimeout(timer));
       }
-      
+
       const timer1 = setTimeout(() => {
         console.log("🔥 Countdown: 2 seconds left");
         setAutoSendCountdown(2);
       }, 1000);
-      
+
       const timer2 = setTimeout(() => {
         console.log("🔥 Countdown: 1 second left");
         setAutoSendCountdown(1);
       }, 2000);
-      
+
       const timer3 = setTimeout(() => {
         console.log("🔥 AUTO-SENDING NOW:", responseText);
         setAutoSendCountdown(0);
-        sendMessage({ 
-          command: "speak", 
+        sendMessage({
+          command: "speak",
           payload: responseText,
           continue_previous_topic: continuePreviousTopic
         });
         setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AUTO-SENT: ${responseText} ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`]);
         setInputText("");
       }, 3000);
-      
+
       window.autoSendTimers = [timer1, timer2, timer3];
     } else {
       console.log("🔥 Auto-send skipped - automation disabled or empty text");
@@ -391,8 +398,7 @@ const WizardPage = () => {
     setActiveMediaContext({ filename: imageFilename, mode });
     setLog((prev) => [
       ...prev,
-      `[${getTimestamp()}] ${
-        mode === "conversation" ? "Started conversation" : "Suggested response"
+      `[${getTimestamp()}] ${mode === "conversation" ? "Started conversation" : "Suggested response"
       } for "${imageFilename}" ${continuePreviousTopic ? '(Continue topic)' : '(New focus)'}`,
     ]);
 
@@ -403,21 +409,21 @@ const WizardPage = () => {
     };
 
     console.log("Sending to /api/analyze-media:", requestData);
-    
+
     try {
       setLog((prev) => [...prev, `[${getTimestamp()}] 🔄 Sending image to AI for analysis...`]);
-      
+
       const res = await fetch("http://localhost:8000/api/analyze-media", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestData),
       });
-      
+
       console.log("Response status:", res.status, res.statusText);
-      
+
       if (!res.ok) {
         let errorMessage = `Server error: ${res.status} ${res.statusText}`;
-        
+
         try {
           const errorData = await res.json();
           errorMessage += ` - ${errorData.message || errorData.error || 'Unknown error'}`;
@@ -434,24 +440,24 @@ const WizardPage = () => {
             console.log("Could not get error response text");
           }
         }
-        
+
         throw new Error(errorMessage);
       }
-      
+
       const data = await res.json();
       console.log("Success response data:", data);
-      
+
       const llmOutput = data.analysis || "No response from LLM";
       setLlmResponse(llmOutput);
       setInputText(llmOutput);
-      
+
       setLog((prev) => [...prev, `[${getTimestamp()}] ✅ AI analysis completed successfully`]);
-      
+
     } catch (error) {
       console.error("Error in handleSendToLLM:", error);
-      
+
       let userMessage = "Error contacting LLM: ";
-      
+
       if (error.message.includes('fetch')) {
         userMessage += "Cannot connect to server. Check if backend is running.";
         setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Connection Error: Backend server may be down`]);
@@ -468,10 +474,10 @@ const WizardPage = () => {
         userMessage += error.message;
         setLog((prev) => [...prev, `[${getTimestamp()}] ❌ Unexpected Error: ${error.message}`]);
       }
-      
+
       setLlmResponse(userMessage);
       setInputText("");
-      
+
       setLog((prev) => [...prev, `[${getTimestamp()}] 🔍 Debug Info: Image="${imageFilename}", Mode="${mode}", ContinueTopic=${continuePreviousTopic}`]);
       setLog((prev) => [...prev, `[${getTimestamp()}] 💡 Troubleshooting: Check backend server, API implementation, and LLM configuration`]);
     }
@@ -482,8 +488,12 @@ const WizardPage = () => {
     if (message.command === "displayMedia") {
       setLatestImage(message.payload);
       setDisplayedMedia(message.payload);
+      setIsPerceptionActive(false);
+      setLivePerception({ image: null, detections: [] });
     } else if (message.command === "displayFace") {
       setDisplayedMedia(null);
+      setIsPerceptionActive(false);
+      setLivePerception({ image: null, detections: [] });
     }
   };
 
@@ -501,7 +511,7 @@ const WizardPage = () => {
   const onWsMessage = (data) => {
     console.log('onWsMessage received:', data)
     console.log('Current automation state:', automationEnabled)
-    
+
     if (data.type === 'session_started') {
       setLog((prev) => [...prev, `[${getTimestamp()}] 🟢 New session started: ${data.family_id}`]);
       refreshSessionStatus();
@@ -516,24 +526,24 @@ const WizardPage = () => {
       const responseText = data.data;
       setLog((prev) => [...prev, `[${getTimestamp()}] AI Response: ${responseText}`]);
       setInputText(responseText);
-      
+
       console.log("Suggested response received! Automation enabled:", automationEnabled);
       autoSendResponse(responseText);
-        
+
     } else if (data.type === 'wizard_response') {
       const responseText = data.data.text;
       setLog((prev) => [...prev, `[${getTimestamp()}] AI Response (Image): ${responseText}`]);
       setInputText(responseText);
-      
+
       console.log("Wizard response received! Automation enabled:", automationEnabled);
       autoSendResponse(responseText);
-        
+
     } else if (data.type === 'media_uploaded') {
-      const { filename, source } = data;
+      const { filename, source, is_live_capture } = data;
 
       setUploadNotification(`Media uploaded: ${filename}`);
       setTimeout(() => {
-          setUploadNotification(null);
+        setUploadNotification(null);
       }, 3000);
       setLatestUploadedFile(filename);
       setLatestImage(filename);
@@ -553,10 +563,14 @@ const WizardPage = () => {
           return next;
         });
       }
+
+      if (is_live_capture) {
+        handleSendToLLM(filename, "conversation");
+      }
     } else if (data.type === "saved_locations") {
       const locationList = data.data;
       setSavedLocations(locationList);
-    } 
+    }
     // NEW: Handle latest image updates
     else if (data.type === 'picture_taken') {
       console.log('🔍 FRONTEND: picture_taken event received:', data);
@@ -573,12 +587,19 @@ const WizardPage = () => {
 
       if (statusData.last_displayed) {
         // Extract filename from path if it's a full path
-        const filename = typeof statusData.last_displayed === 'string' 
-          ? statusData.last_displayed.split('/').pop() 
+        const filename = typeof statusData.last_displayed === 'string'
+          ? statusData.last_displayed.split('/').pop()
           : statusData.last_displayed;
 
         console.log('🔍 FRONTEND: Setting latest image from initial_status to:', filename);
         setLatestImage(filename);
+      }
+    } else if (data.type === 'perception_update') {
+      if (isPerceptionActiveRef.current) {
+        setLivePerception({
+          image: data.data.image,
+          detections: data.data.detections
+        });
       }
     }
   };
@@ -628,8 +649,8 @@ const WizardPage = () => {
   }
 
   return (
-    <div className="container-fluid p-0" style={{ 
-      height: '100vh', 
+    <div className="container-fluid p-0" style={{
+      height: '100vh',
       overflow: 'hidden',
       backgroundColor: '#f8f9fa'
     }}>
@@ -775,9 +796,9 @@ const WizardPage = () => {
         <div
           className="alert alert-success position-fixed bottom-0 start-50 translate-middle-x mb-3"
           role="alert"
-          style={{ 
-            zIndex: 1050, 
-            borderRadius: '10px', 
+          style={{
+            zIndex: 1050,
+            borderRadius: '10px',
             border: 'none',
             boxShadow: '0 4px 12px rgba(40, 167, 69, 0.3)'
           }}
@@ -804,17 +825,17 @@ const WizardPage = () => {
             <div className="card-header bg-warning text-dark" style={{ borderRadius: '12px 12px 0 0' }}>
               <h6 className="mb-0" style={{ fontWeight: '600' }}>📊 Research Session Control</h6>
             </div>
-            <div className="card-body p-3" style={{ 
-              maxHeight: showControls ? 'calc(100vh - 310px)' : 'calc(100vh - 160px)', 
-              overflowY: 'auto' 
-              }}>
-              <div 
+            <div className="card-body p-3" style={{
+              maxHeight: showControls ? 'calc(100vh - 310px)' : 'calc(100vh - 160px)',
+              overflowY: 'auto'
+            }}>
+              <div
                 className={`p-2 mb-3 rounded ${sessionInfo.active ? 'session-status-active' : 'session-status-inactive'}`}
                 style={{ fontSize: '0.9rem', fontWeight: '600' }}
               >
                 {sessionInfo.active ? '🟢 ACTIVE SESSION' : '🔴 NO ACTIVE SESSION'}
               </div>
-              
+
               <div className="mb-3">
                 <div className="d-flex justify-content-between align-items-center mb-2">
                   <h6 className="mb-0" style={{ fontSize: '0.9rem', fontWeight: '600' }}>
@@ -828,7 +849,7 @@ const WizardPage = () => {
                     {showConfig ? 'Hide' : 'Show'}
                   </button>
                 </div>
-                
+
                 {showConfig && (
                   <div className="border rounded p-2" style={{ fontSize: '0.8rem' }}>
                     <div className="mb-2">
@@ -836,8 +857,8 @@ const WizardPage = () => {
                         Child Age:
                       </label>
                       <div className="input-group input-group-sm">
-                        <button 
-                          className="btn btn-outline-secondary" 
+                        <button
+                          className="btn btn-outline-secondary"
                           type="button"
                           onClick={() => setChildAge(Math.max(1, childAge - 1))}
                           disabled={isUpdatingConfig || childAge <= 1}
@@ -860,8 +881,8 @@ const WizardPage = () => {
                           disabled={isUpdatingConfig}
                           style={{ fontSize: '0.8rem', maxWidth: '60px' }}
                         />
-                        <button 
-                          className="btn btn-outline-secondary" 
+                        <button
+                          className="btn btn-outline-secondary"
                           type="button"
                           onClick={() => setChildAge(Math.min(15, childAge + 1))}
                           disabled={isUpdatingConfig || childAge >= 15}
@@ -874,7 +895,7 @@ const WizardPage = () => {
                         Age range: 1-15 years
                       </div>
                     </div>
-                    
+
                     <div className="mb-2">
                       <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
                         Conversation Focus:
@@ -894,7 +915,7 @@ const WizardPage = () => {
                         {focusDescriptions[conversationFocus]}
                       </div>
                     </div>
-                    
+
                     <div className="mb-2">
                       <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
                         Safety Risk Level:
@@ -925,16 +946,16 @@ const WizardPage = () => {
                         disabled={isUpdatingConfig}
                       />
                     </div>
-                    
+
                     <div className="mb-2">
                       <label className="form-label mb-1" style={{ fontSize: '0.75rem', fontWeight: '600' }}>
                         Conversation Mode:
                       </label>
-                      <div 
-                        className="p-2" 
-                        style={{ 
-                          backgroundColor: '#f8f9fa', 
-                          borderRadius: '4px', 
+                      <div
+                        className="p-2"
+                        style={{
+                          backgroundColor: '#f8f9fa',
+                          borderRadius: '4px',
                           border: '1px solid #dee2e6',
                           fontSize: '0.75rem'
                         }}
@@ -948,17 +969,17 @@ const WizardPage = () => {
                             onChange={(e) => setContinuePreviousTopic(e.target.checked)}
                             disabled={isUpdatingConfig}
                           />
-                          <label 
-                            className="form-check-label" 
-                            htmlFor="continueTopicToggle" 
+                          <label
+                            className="form-check-label"
+                            htmlFor="continueTopicToggle"
                             style={{ fontSize: '0.75rem', fontWeight: '500' }}
                           >
                             📜 Continue previous topic
                           </label>
-                          <div 
-                            className="text-muted mt-1" 
-                            style={{ 
-                              fontSize: '0.65rem', 
+                          <div
+                            className="text-muted mt-1"
+                            style={{
+                              fontSize: '0.65rem',
                               lineHeight: '1.2',
                               paddingLeft: '24px'
                             }}
@@ -968,7 +989,7 @@ const WizardPage = () => {
                         </div>
                       </div>
                     </div>
-                    
+
                     {sessionInfo.active ? (
                       <button
                         className="btn btn-clean btn-warning btn-sm w-100"
@@ -986,15 +1007,15 @@ const WizardPage = () => {
                   </div>
                 )}
               </div>
-              
+
               {sessionInfo.active ? (
                 <div className="mb-3">
                   <div className="mb-2" style={{ fontSize: '0.85rem' }}>
-                    <strong>Family:</strong> {sessionInfo.family_id}<br/>
-                    <strong>Duration:</strong> {getSessionDuration()}<br/>
-                    <strong>Messages:</strong> {sessionInfo.message_count}<br/>
-                    <strong>Age:</strong> {sessionInfo.child_age || childAge}<br/>
-                    <strong>Focus:</strong> {sessionInfo.conversation_focus || conversationFocus}<br/>
+                    <strong>Family:</strong> {sessionInfo.family_id}<br />
+                    <strong>Duration:</strong> {getSessionDuration()}<br />
+                    <strong>Messages:</strong> {sessionInfo.message_count}<br />
+                    <strong>Age:</strong> {sessionInfo.child_age || childAge}<br />
+                    <strong>Focus:</strong> {sessionInfo.conversation_focus || conversationFocus}<br />
                     <strong>Risk:</strong> {sessionInfo.safety_risk_level || safetyRiskLevel}
                   </div>
                   <div className="d-flex gap-2">
@@ -1035,7 +1056,7 @@ const WizardPage = () => {
                   </button>
                 </div>
               )}
-              
+
               <hr className="my-2" />
               <button
                 className="btn btn-clean btn-outline-secondary btn-sm w-100"
@@ -1050,10 +1071,10 @@ const WizardPage = () => {
         </div>
       )}
 
-      <div 
-        className="container-fluid main-content" 
-        style={{ 
-          marginTop: '70px', 
+      <div
+        className="container-fluid main-content"
+        style={{
+          marginTop: '70px',
           height: 'calc(100vh - 70px)',
           paddingTop: '0',
           paddingBottom: showControls ? '200px' : '20px',
@@ -1066,13 +1087,13 @@ const WizardPage = () => {
           <div className="col-md-6 h-100 d-flex flex-column pe-3">
             <div className="card card-clean shadow-sm h-100 d-flex flex-column">
               <div className="card-header bg-primary text-white" style={{ borderRadius: '12px 12px 0 0' }}>
-                <h5 className="mb-0" style={{ fontWeight: '600', fontSize: '1.3rem'}}>Message Log & Control</h5>
+                <h5 className="mb-0" style={{ fontWeight: '600', fontSize: '1.3rem' }}>Message Log & Control</h5>
               </div>
               <div className="card-body d-flex flex-column p-3" style={{ minHeight: 0, overflow: 'hidden' }}>
                 <div
                   className="log-area p-3 mb-3 position-relative"
-                  style={{ 
-                    overflowY: "auto", 
+                  style={{
+                    overflowY: "auto",
                     fontSize: "0.95rem",
                     fontFamily: 'Monaco, "Lucida Console", monospace',
                     minHeight: "200px",
@@ -1184,14 +1205,14 @@ const WizardPage = () => {
                   )}
 
                   {autoSendCountdown > 0 && (
-                    <div className="alert alert-warning py-2 px-3 mb-2 text-center border-warning" 
-                         style={{ 
-                           backgroundColor: '#fff3cd',
-                           borderWidth: '2px',
-                           fontSize: '1.1rem',
-                           fontWeight: 'bold',
-                           borderRadius: '10px'
-                         }}>
+                    <div className="alert alert-warning py-2 px-3 mb-2 text-center border-warning"
+                      style={{
+                        backgroundColor: '#fff3cd',
+                        borderWidth: '2px',
+                        fontSize: '1.1rem',
+                        fontWeight: 'bold',
+                        borderRadius: '10px'
+                      }}>
                       ⏰ AUTO-SENDING IN {autoSendCountdown} SECONDS...
                       <div className="small mt-1">Click "Speak" to cancel auto-send</div>
                     </div>
@@ -1208,7 +1229,7 @@ const WizardPage = () => {
                         placeholder="Enter text for robot to speak..."
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
-                        style={{ 
+                        style={{
                           fontSize: '1.05rem',
                           lineHeight: '1.4',
                           resize: 'vertical'
@@ -1234,9 +1255,9 @@ const WizardPage = () => {
                                 window.autoSendTimers = [];
                               }
                               setAutoSendCountdown(0);
-                              
-                              sendMessage({ 
-                                command: "speak", 
+
+                              sendMessage({
+                                command: "speak",
                                 payload: text,
                                 continue_previous_topic: continuePreviousTopic
                               });
@@ -1254,13 +1275,13 @@ const WizardPage = () => {
                             setAutomationEnabled(enabled => {
                               const next = !enabled;
                               console.log("Toggling automation from", enabled, "to", next);
-                              
+
                               if (window.autoSendTimers) {
                                 window.autoSendTimers.forEach(timer => clearTimeout(timer));
                                 window.autoSendTimers = [];
                               }
                               setAutoSendCountdown(0);
-                              
+
                               wsRef.current?.send(JSON.stringify({
                                 command: next ? 'startAutomation' : 'stopAutomation',
                                 payload: ""
@@ -1288,7 +1309,7 @@ const WizardPage = () => {
                         placeholder="Type what a user might say to trigger Temi's response..."
                         value={simulatedUserInput}
                         onChange={(e) => setSimulatedUserInput(e.target.value)}
-                        style={{ 
+                        style={{
                           fontSize: '1.0rem',
                           lineHeight: '1.4',
                           resize: 'vertical'
@@ -1318,22 +1339,68 @@ const WizardPage = () => {
             </div>
           </div>
 
-          <div className="col-md-6 h-100 ps-3">
-            <div className="card card-clean shadow-sm h-100 d-flex flex-column">
+          <div className="col-md-6 h-100 ps-3 d-flex flex-column gap-3">
+            // Live Perception Panel
+            <div className="card card-clean shadow-sm" style={{ flex: '0 0 auto', maxHeight: '40%' }}>
+              <div className="card-header bg-info text-white d-flex justify-content-between align-items-center" style={{ borderRadius: '12px 12px 0 0', padding: '0.5rem 1rem' }}>
+                <h6 className="mb-0" style={{ fontWeight: '600', fontSize: '1.1rem' }}>👁️ Live Perception (Temi View)</h6>
+                <button
+                  className="btn btn-sm btn-light"
+                  disabled={!livePerception.image}
+                  onClick={() => {
+                    const customName = window.prompt("Enter a name for the captured frame:");
+                    if (customName === null) return; // User cancelled
+                    //sendMessage({ command: "takePicture", payload: customName || "" }); (regular image capture, says location)
+                    sendMessage({ command: "captureLiveFrame", payload: customName.trim() });
+                    // if (customName.trim() !== "") {
+                    //   setTimeout(() => {
+                    //     sendMessage({ command: "queryLocations", payload: "" });
+                    //   }, 3000);
+                    // } trying to save location w/o the speech
+                  }}
+                  style={{ fontSize: '0.8rem', fontWeight: '500', padding: '2px 8px' }}
+                >
+                  📸 Capture Frame
+                </button>
+              </div>
+              <div className="card-body p-2 d-flex gap-2" style={{ overflow: 'hidden' }}>
+                <div style={{ flex: '1', backgroundColor: '#000', borderRadius: '8px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {livePerception.image ? (
+                    <img src={livePerception.image} alt="Live feed" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                  ) : (
+                    <span className="text-muted small">No live feed</span>
+                  )}
+                </div>
+                <div style={{ width: '150px', overflowY: 'auto', borderLeft: '1px solid #dee2e6', paddingLeft: '8px' }}>
+                  <h6 className="small text-muted mb-1">Detections:</h6>
+                  {livePerception.detections && livePerception.detections.length > 0 ? (
+                    livePerception.detections.map((d, i) => (
+                      <div key={i} className="badge bg-secondary mb-1 w-100 text-start text-truncate" title={`${d.class} (${Math.round(d.confidence * 100)}%)`}>
+                        {d.class} {Math.round(d.confidence * 100)}%
+                      </div>
+                    ))
+                  ) : (
+                    <div className="small text-muted">None</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="card card-clean shadow-sm d-flex flex-column" style={{ flex: '1 1 auto', minHeight: 0 }}>
               <div className="card-header bg-success text-white" style={{ borderRadius: '12px 12px 0 0' }}>
                 <h5 className="mb-0" style={{ fontWeight: '600', fontSize: '1.3rem' }}>📁 Media Library</h5>
               </div>
-              <div 
-                className="card-body p-1 d-flex flex-column" 
-                style={{ 
+              <div
+                className="card-body p-1 d-flex flex-column"
+                style={{
                   minHeight: 0,
-                  height: 'calc(100vh - 200px)',
+                  height: '100%',
                   overflow: 'hidden'
                 }}
               >
-                <div 
+                <div
                   className="media-list-container"
-                  style={{ 
+                  style={{
                     height: '100%',
                     width: '100%',
                     overflow: 'auto',
@@ -1357,11 +1424,10 @@ const WizardPage = () => {
         </div>
       </div>
 
-      <div 
-        className={`position-fixed bottom-0 start-0 end-0 control-panel ${
-          showControls ? 'translate-y-0' : 'translate-y-100'
-        }`}
-        style={{ 
+      <div
+        className={`position-fixed bottom-0 start-0 end-0 control-panel ${showControls ? 'translate-y-0' : 'translate-y-100'
+          }`}
+        style={{
           transform: showControls ? 'translateY(0)' : 'translateY(100%)',
           transition: 'transform 0.3s ease',
           zIndex: 1000,
@@ -1403,9 +1469,8 @@ const WizardPage = () => {
               <div className="row g-1">
                 <div className="col-3">
                   <button
-                    className={`btn btn-clean btn-sm w-100 ${
-                      pressedButtons.includes(14) ? "btn-success" : "btn-outline-primary"
-                    }`}
+                    className={`btn btn-clean btn-sm w-100 ${pressedButtons.includes(14) ? "btn-success" : "btn-outline-primary"
+                      }`}
                     onClick={() => sendMessage({ command: "turnBy", payload: "10" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
@@ -1414,9 +1479,8 @@ const WizardPage = () => {
                 </div>
                 <div className="col-3">
                   <button
-                    className={`btn btn-clean btn-sm w-100 ${
-                      pressedButtons.includes(12) ? "btn-success" : "btn-outline-primary"
-                    }`}
+                    className={`btn btn-clean btn-sm w-100 ${pressedButtons.includes(12) ? "btn-success" : "btn-outline-primary"
+                      }`}
                     onClick={() => sendMessage({ command: "skidJoy", payload: "(0.5, 0)" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
@@ -1425,9 +1489,8 @@ const WizardPage = () => {
                 </div>
                 <div className="col-3">
                   <button
-                    className={`btn btn-clean btn-sm w-100 ${
-                      pressedButtons.includes(13) ? "btn-success" : "btn-outline-primary"
-                    }`}
+                    className={`btn btn-clean btn-sm w-100 ${pressedButtons.includes(13) ? "btn-success" : "btn-outline-primary"
+                      }`}
                     onClick={() => sendMessage({ command: "skidJoy", payload: "(-0.5, 0)" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
@@ -1436,9 +1499,8 @@ const WizardPage = () => {
                 </div>
                 <div className="col-3">
                   <button
-                    className={`btn btn-clean btn-sm w-100 ${
-                      pressedButtons.includes(15) ? "btn-success" : "btn-outline-primary"
-                    }`}
+                    className={`btn btn-clean btn-sm w-100 ${pressedButtons.includes(15) ? "btn-success" : "btn-outline-primary"
+                      }`}
                     onClick={() => sendMessage({ command: "turnBy", payload: "-10" })}
                     style={{ fontSize: '0.75rem', padding: '6px 4px' }}
                   >
@@ -1510,6 +1572,25 @@ const WizardPage = () => {
                   </button>
                 </div>
 
+              </div>
+
+              <div className="row g-1 mt-1">
+                <div className="col-12">
+                  <button
+                    className={`btn btn-clean btn-sm w-100 ${isPerceptionActive ? 'btn-danger' : 'btn-outline-info'}`}
+                    onClick={() => {
+                      const nextState = !isPerceptionActive;
+                      setIsPerceptionActive(nextState);
+                      sendMessage({ command: "togglePerception", payload: nextState ? "on" : "off" });
+                      if (!nextState) {
+                        setLivePerception({ image: null, detections: [] });
+                      }
+                    }}
+                    style={{ fontSize: '0.8rem', padding: '6px 8px' }}
+                  >
+                    {isPerceptionActive ? '👁️ Stop Perception' : '👁️ Start Live Perception'}
+                  </button>
+                </div>
               </div>
 
               <div className="row g-1 mt-1">
