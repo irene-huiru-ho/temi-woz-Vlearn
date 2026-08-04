@@ -21,14 +21,14 @@ const WizardPage = () => {
   const [showControls, setShowControls] = useState(true);
   const [autoSendCountdown, setAutoSendCountdown] = useState(0);
 
-  // NEW: Simulated User Input State
+  // Simulated User Input State
   const [simulatedUserInput, setSimulatedUserInput] = useState("");
 
-  // NEW: Latest Image State
+  // Perception and Image State
   const [latestImage, setLatestImage] = useState("");
   const [livePerception, setLivePerception] = useState({ image: null, detections: [] });
   const [isPerceptionActive, setIsPerceptionActive] = useState(false);
-  const [scanTarget, setScanTarget] = useState("none"); // "none", "book", "laptop", "bottle", "person"
+  const [scanTarget, setScanTarget] = useState("none");
   const isPerceptionActiveRef = useRef(false);
 
   useEffect(() => {
@@ -75,7 +75,7 @@ const WizardPage = () => {
     console.log("Automation state changed to:", automationEnabled);
   }, [automationEnabled]);
 
-  // NEW: Send Simulated User Input Function
+  // Send Simulated User Input Function
   const sendSimulatedUserInput = () => {
     const text = simulatedUserInput.trim();
     if (!text) return;

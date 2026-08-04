@@ -325,7 +325,7 @@ class WebSocketServer:
                 }
                 await self.send_message(PATH_CONTROL, latest_image_msg)
             await self.send_message(PATH_TEMI, msg_json)
-            
+
         #testing
 
         elif msg_json['command'] == 'setLatestImage':
@@ -357,7 +357,7 @@ class WebSocketServer:
                 return
             self.activate_image_question_mode()
             msg_json['payload'] = self.latest_image  # Ensure payload is set to latest image
-            await self.send_message(PATH_TEMI, msg_json)    
+            await self.send_message(PATH_TEMI, msg_json)
             # setLog(prev => [...prev, f"[{timestamp}] 🎧📷 Listen mode activated (with image: {self.latest_image})"])
         
         elif msg_json['command'] == 'captureLiveFrame':
@@ -654,9 +654,19 @@ class WebSocketServer:
                             }
                         }
                         await self.send_message(PATH_CONTROL, perception_msg)
+
+                        # Debug logging for Android Studio Logcat & Backend console
+                        if detections:
+                            for det in detections:
+                                det_class = det["class"]
+                                conf = det.get("confidence", 0.0)
+                                print(f"[PERCEPTION_DEBUG] {det_class} detected (confidence: {conf:.2f})")
+                                await self.send_message(PATH_TEMI, {
+                                    "command": "detectionDebug",
+                                    "payload": f"{det_class.lower()} detected"
+                                })
                         
-                        # Check if we are searching for object
-                        # Check if we are searching for object
+                        # Check if Temi is searching for object
                         if self.search_state == "SEARCHING_OBJECT" and self.search_target_object:
                             target = self.search_target_object
                             matched_class = None
