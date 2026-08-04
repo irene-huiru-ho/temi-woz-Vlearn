@@ -106,12 +106,17 @@ def get_status():
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    # Create upload directory if it doesn't exist
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    
-    # Sanitize filename to prevent directory traversal
     safe_filename = os.path.basename(file.filename)
-    save_path = os.path.join(UPLOAD_DIR, safe_filename)
+    base, ext = os.path.splitext(safe_filename)
+    counter = 1
+    filename = safe_filename
+    save_path = os.path.join(UPLOAD_DIR, filename)
+    while os.path.exists(save_path):
+        filename = f"{base}_{counter}{ext}"
+        save_path = os.path.join(UPLOAD_DIR, filename)
+        counter += 1
+    safe_filename = filename
 
     try:
         with open(save_path, "wb") as f:

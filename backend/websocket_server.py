@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from websockets.asyncio.server import serve
 from fastapi import WebSocketDisconnect
 import signal
@@ -44,6 +45,9 @@ class WebSocketServer:
         self.saved_locations = []
         self.lost_track_frames = 0
         self.latest_raw_frame = None
+        self.auto_scan_target = None  # None/none, "book", "laptop", "bottle", "person"
+        self.book_scanning_enabled = False
+        self.approach_start_time = 0
         
     @property
     def messages(self):
@@ -377,10 +381,17 @@ class WebSocketServer:
                 import datetime
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 if custom_name:
-                    filename = f"{custom_name}.jpg"
+                    filename = f"{custom_name}_{timestamp}.jpg"
                 else:
                     filename = f"live_capture_{timestamp}.jpg"
+                
+                base, ext = os.path.splitext(filename)
+                counter = 1
                 filepath = os.path.join("participant_data/media", filename)
+                while os.path.exists(filepath):
+                    filename = f"{base}_{counter}{ext}"
+                    filepath = os.path.join("participant_data/media", filename)
+                    counter += 1
                 
                 os.makedirs("participant_data/media", exist_ok=True)
                 with open(filepath, "wb") as f:
@@ -409,6 +420,36 @@ class WebSocketServer:
                 print(f"[INFO] Saved live raw frame to {filepath}")
             else:
                 print("[WARN] No live raw frame available in memory to capture yet.")
+
+        elif msg_json['command'] in ['setScanTarget', 'toggleBookScanning']:
+            payload = msg_json.get('payload', 'none')
+            if payload == 'on' or payload is True:
+                payload = 'book'
+            elif payload == 'off' or payload is False or not payload:
+                payload = 'none'
+            
+            target = str(payload).lower().strip()
+            self.auto_scan_target = target if target != 'none' else None
+            self.book_scanning_enabled = bool(self.auto_scan_target)
+
+            # If switched to OFF/none, immediately stop movement and reset search state
+            if not self.auto_scan_target:
+                if self.search_state in ["SEARCHING_OBJECT", "APPROACHING_OBJECT", "WAITING_FOR_PICTURE"]:
+                    print("[SCAN_TARGET] Target set to OFF. Cancelling search and stopping robot movement.")
+                    self.search_state = "IDLE"
+                    self.search_target_object = None
+                    self.lost_track_frames = 0
+                    await self.send_message(PATH_TEMI, {"command": "stopMovement", "payload": ""})
+
+            print(f"[SCAN_TARGET] Auto scan target set to: {self.auto_scan_target}")
+            msg = {
+                'type': 'scan_target_status',
+                'data': {
+                    'target': self.auto_scan_target or 'none',
+                    'enabled': bool(self.auto_scan_target)
+                }
+            }
+            await self.send_message(PATH_CONTROL, msg)
 
         elif msg_json['command'] == 'togglePerception':
             payload = msg_json.get('payload', 'off')
@@ -457,7 +498,9 @@ class WebSocketServer:
                     'data': {
                         'behavior_mode': self.behavior_mode,
                         'last_displayed': latest_image_filename,
-                        'current_session': session_info
+                        'current_session': session_info,
+                        'auto_scan_target': self.auto_scan_target or 'none',
+                        'book_scanning_enabled': bool(self.auto_scan_target)
                     }
                 }
                 await self.send_message(PATH_CONTROL, msg)
@@ -529,10 +572,8 @@ class WebSocketServer:
                     print("[SEARCH] Picture taken successfully. Speaking arrival and turning off perception.")
                     self.search_state = "IDLE"
                     
-                    if self.search_target_object == "book":
-                        speak_text = f"I have reached the {self.search_target_object} and taken a picture."
-                    else:
-                        speak_text = f"{self.search_target_object} found"
+                    target_name = self.search_target_object or "object"
+                    speak_text = f"I have reached the {target_name} and taken a picture."
                         
                     await self.send_message(PATH_TEMI, {"command": "speak", "payload": speak_text})
                     await self.send_message(PATH_TEMI, {"command": "togglePerception", "payload": "off"})
@@ -615,6 +656,7 @@ class WebSocketServer:
                         await self.send_message(PATH_CONTROL, perception_msg)
                         
                         # Check if we are searching for object
+                        # Check if we are searching for object
                         if self.search_state == "SEARCHING_OBJECT" and self.search_target_object:
                             target = self.search_target_object
                             matched_class = None
@@ -625,35 +667,48 @@ class WebSocketServer:
                                     break
                             
                             if matched_class:
-                                if target == "book":
-                                    print(f"[SEARCH] Book found! Transitioning to APPROACHING_OBJECT.")
-                                    self.search_state = "APPROACHING_OBJECT"
-                                    self.lost_track_frames = 0
-                                    await self.send_message(PATH_TEMI, {"command": "speak", "payload": "Book detected. Moving closer."})
-                                    await self.send_message(PATH_CONTROL, {"type": "search_status", "data": "Book detected. Moving closer..."})
-                                else:
-                                    print(f"[SEARCH] Object found: {matched_class}! Taking picture and notifying user.")
-                                    self.search_state = "WAITING_FOR_PICTURE"
-                                    # Take picture
-                                    await self.send_message(PATH_TEMI, {"command": "takePicture", "payload": f"found_{matched_class}"})
-
-                        elif self.search_state == "IDLE":
-                            # If book detected while in IDLE state approach
-                            matched_book = None
-                            for det in detections:
-                                if det["class"].lower() == "book":
-                                    matched_book = det
-                                    break
-                            if matched_book:
-                                print(f"[PERCEPTION] Book detected in IDLE state! Transitioning to APPROACHING_OBJECT.")
+                                target_display = matched_class.capitalize()
+                                print(f"[SEARCH] Object found: {matched_class}! Transitioning to APPROACHING_OBJECT.")
                                 self.search_state = "APPROACHING_OBJECT"
-                                self.search_target_object = "book"
+                                self.search_target_object = matched_class
+                                self.approach_start_time = time.time()
                                 self.lost_track_frames = 0
-                                await self.send_message(PATH_TEMI, {"command": "speak", "payload": "Book detected. Moving closer."})
-                                await self.send_message(PATH_CONTROL, {"type": "search_status", "data": "Book detected. Moving closer..."})
+                                await self.send_message(PATH_TEMI, {"command": "speak", "payload": f"{target_display} detected. Moving closer."})
+                                await self.send_message(PATH_CONTROL, {"type": "search_status", "data": f"{target_display} detected. Moving closer..."})
+
+                        elif self.search_state == "IDLE" and self.auto_scan_target:
+                            # If auto scan target is set (book, laptop, bottle, person), search and approach it
+                            target = self.auto_scan_target.lower()
+                            matched_obj = None
+                            for det in detections:
+                                det_class = det["class"].lower()
+                                if det_class == target or target in det_class or det_class in target:
+                                    matched_obj = det
+                                    break
+                            if matched_obj:
+                                target_display = target.capitalize()
+                                print(f"[PERCEPTION] {target_display} detected in IDLE state! Transitioning to APPROACHING_OBJECT.")
+                                self.search_state = "APPROACHING_OBJECT"
+                                self.search_target_object = target
+                                self.approach_start_time = time.time()
+                                self.lost_track_frames = 0
+                                await self.send_message(PATH_TEMI, {"command": "speak", "payload": f"{target_display} detected. Moving closer."})
+                                await self.send_message(PATH_CONTROL, {"type": "search_status", "data": f"{target_display} detected. Moving closer..."})
 
                         elif self.search_state == "APPROACHING_OBJECT" and self.search_target_object:
+                            # If auto scan target was turned off and not in manual room search, cancel approach
+                            if not self.auto_scan_target and not self.search_target_room:
+                                print("[SEARCH] Auto scan target turned off while approaching. Stopping movement.")
+                                self.search_state = "IDLE"
+                                self.search_target_object = None
+                                self.lost_track_frames = 0
+                                await self.send_message(PATH_TEMI, {"command": "stopMovement", "payload": ""})
+                                return
+
                             target = self.search_target_object
+                            elapsed = time.time() - self.approach_start_time if self.approach_start_time else 0
+                            MAX_APPROACH_TIME = 12.0  # Allow up to 12 seconds to approach object
+                            
                             target_detection = None
                             for det in detections:
                                 det_class = det["class"].lower()
@@ -667,18 +722,23 @@ class WebSocketServer:
                                 if rel_box:
                                     x1_rel, y1_rel, x2_rel, y2_rel = rel_box
                                     rel_width = x2_rel - x1_rel
+                                    rel_height = y2_rel - y1_rel
                                     rel_center_x = (x1_rel + x2_rel) / 2.0
                                     
-                                    print(f"[SEARCH] Approaching book: width={rel_width:.3f}, center_x={rel_center_x:.3f}")
+                                    print(f"[SEARCH] Approaching {target}: width={rel_width:.3f}, height={rel_height:.3f}, elapsed={elapsed:.1f}s")
                                     
-                                    # Check if close enough
-                                    if rel_width >= 0.45: # width
-                                        print("[SEARCH] Reached target distance. Stopping and taking picture.")
+                                    # Check if close enough (rel_width >= 0.45 or rel_height >= 0.55) OR approach time limit reached
+                                    is_close = rel_width >= 0.45 or rel_height >= 0.55
+                                    is_timeout = elapsed >= MAX_APPROACH_TIME
+                                    
+                                    if is_close or is_timeout:
+                                        reason = "Reached target distance" if is_close else f"Approach time limit reached ({elapsed:.1f}s)"
+                                        print(f"[SEARCH] {reason}. Stopping and taking picture of {target}.")
                                         self.search_state = "WAITING_FOR_PICTURE"
                                         await self.send_message(PATH_TEMI, {"command": "stopMovement", "payload": ""})
                                         await self.send_message(PATH_TEMI, {"command": "takePicture", "payload": f"found_{target}"})
                                     else:
-                                        # center book
+                                        # center target
                                         error_x = 0.5 - rel_center_x
                                         y_steer = error_x * 1.2
                                         y_steer = max(-0.4, min(0.4, y_steer))
@@ -688,9 +748,15 @@ class WebSocketServer:
                                         print(f"[SEARCH] Sending skidJoy: x={x_forward}, y={y_steer:.3f}")
                                         await self.send_message(PATH_TEMI, {"command": "skidJoy", "payload": f"({x_forward}, {y_steer:.3f})"})
                             else:
-                                # book not detected
+                                # target not detected
                                 self.lost_track_frames += 1
-                                print(f"[SEARCH] Target book lost! lost_track_frames={self.lost_track_frames}")
+                                print(f"[SEARCH] Target {target} lost! lost_track_frames={self.lost_track_frames}, elapsed={elapsed:.1f}s")
+                                if self.lost_track_frames > 15 or elapsed >= MAX_APPROACH_TIME:
+                                    reason = f"Target lost for {self.lost_track_frames} frames" if self.lost_track_frames > 15 else f"Approach time limit reached ({elapsed:.1f}s)"
+                                    print(f"[SEARCH] {reason} for {target}. Stopping and taking picture anyway.")
+                                    self.search_state = "WAITING_FOR_PICTURE"
+                                    await self.send_message(PATH_TEMI, {"command": "stopMovement", "payload": ""})
+                                    await self.send_message(PATH_TEMI, {"command": "takePicture", "payload": f"found_{target}"})
 
             except Exception as e:
                 print(f"[ERROR][temi_handler][video_frame]: {e}")

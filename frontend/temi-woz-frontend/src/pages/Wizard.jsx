@@ -28,6 +28,7 @@ const WizardPage = () => {
   const [latestImage, setLatestImage] = useState("");
   const [livePerception, setLivePerception] = useState({ image: null, detections: [] });
   const [isPerceptionActive, setIsPerceptionActive] = useState(false);
+  const [scanTarget, setScanTarget] = useState("none"); // "none", "book", "laptop", "bottle", "person"
   const isPerceptionActiveRef = useRef(false);
 
   useEffect(() => {
@@ -594,6 +595,20 @@ const WizardPage = () => {
         console.log('🔍 FRONTEND: Setting latest image from initial_status to:', filename);
         setLatestImage(filename);
       }
+
+      if (statusData.auto_scan_target) {
+        setScanTarget(statusData.auto_scan_target);
+      } else if (statusData.book_scanning_enabled) {
+        setScanTarget("book");
+      }
+    } else if (data.type === 'scan_target_status') {
+      const target = data.data?.target || "none";
+      setScanTarget(target);
+      setLog((prev) => [...prev, `[${getTimestamp()}] 🎯 Auto scan target set to: ${target.toUpperCase()}`]);
+    } else if (data.type === 'book_scanning_status') {
+      const enabled = data.data?.enabled;
+      setScanTarget(enabled ? "book" : "none");
+      setLog((prev) => [...prev, `[${getTimestamp()}] 📖 Book scanning ${enabled ? 'ENABLED' : 'DISABLED'}`]);
     } else if (data.type === 'perception_update') {
       if (isPerceptionActiveRef.current) {
         setLivePerception({
@@ -1340,28 +1355,24 @@ const WizardPage = () => {
           </div>
 
           <div className="col-md-6 h-100 ps-3 d-flex flex-column gap-3">
-            // Live Perception Panel
+            {/* Live Perception Panel */}
             <div className="card card-clean shadow-sm" style={{ flex: '0 0 auto', maxHeight: '40%' }}>
               <div className="card-header bg-info text-white d-flex justify-content-between align-items-center" style={{ borderRadius: '12px 12px 0 0', padding: '0.5rem 1rem' }}>
                 <h6 className="mb-0" style={{ fontWeight: '600', fontSize: '1.1rem' }}>👁️ Live Perception (Temi View)</h6>
-                <button
-                  className="btn btn-sm btn-light"
-                  disabled={!livePerception.image}
-                  onClick={() => {
-                    const customName = window.prompt("Enter a name for the captured frame:");
-                    if (customName === null) return; // User cancelled
-                    //sendMessage({ command: "takePicture", payload: customName || "" }); (regular image capture, says location)
-                    sendMessage({ command: "captureLiveFrame", payload: customName.trim() });
-                    // if (customName.trim() !== "") {
-                    //   setTimeout(() => {
-                    //     sendMessage({ command: "queryLocations", payload: "" });
-                    //   }, 3000);
-                    // } trying to save location w/o the speech
-                  }}
-                  style={{ fontSize: '0.8rem', fontWeight: '500', padding: '2px 8px' }}
-                >
-                  📸 Capture Frame
-                </button>
+                <div className="d-flex gap-2 align-items-center">
+                  <button
+                    className="btn btn-sm btn-light"
+                    disabled={!livePerception.image}
+                    onClick={() => {
+                      const customName = window.prompt("Enter a name for the captured frame:");
+                      if (customName === null) return; // User cancelled
+                      sendMessage({ command: "captureLiveFrame", payload: customName.trim() });
+                    }}
+                    style={{ fontSize: '0.8rem', fontWeight: '500', padding: '2px 8px' }}
+                  >
+                    📸 Capture Frame
+                  </button>
+                </div>
               </div>
               <div className="card-body p-2 d-flex gap-2" style={{ overflow: 'hidden' }}>
                 <div style={{ flex: '1', backgroundColor: '#000', borderRadius: '8px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1575,7 +1586,7 @@ const WizardPage = () => {
               </div>
 
               <div className="row g-1 mt-1">
-                <div className="col-12">
+                <div className="col-6">
                   <button
                     className={`btn btn-clean btn-sm w-100 ${isPerceptionActive ? 'btn-danger' : 'btn-outline-info'}`}
                     onClick={() => {
@@ -1590,6 +1601,27 @@ const WizardPage = () => {
                   >
                     {isPerceptionActive ? '👁️ Stop Perception' : '👁️ Start Live Perception'}
                   </button>
+                </div>
+                <div className="col-6">
+                  <div className="input-group input-group-sm">
+                    <span className="input-group-text bg-light text-dark" style={{ fontSize: '0.75rem', fontWeight: '600' }}>🎯 Target</span>
+                    <select
+                      className="form-select form-select-sm"
+                      value={scanTarget}
+                      onChange={(e) => {
+                        const target = e.target.value;
+                        setScanTarget(target);
+                        sendMessage({ command: "setScanTarget", payload: target });
+                      }}
+                      style={{ fontSize: '0.8rem', backgroundColor: scanTarget !== 'none' ? '#ffc107' : '#ffffff', color: scanTarget !== 'none' ? '#000000' : '#212529', fontWeight: scanTarget !== 'none' ? 'bold' : 'normal' }}
+                    >
+                      <option value="none">Off (Disabled)</option>
+                      <option value="book">📖 Book</option>
+                      <option value="laptop">💻 Laptop</option>
+                      <option value="bottle">🍾 Bottle</option>
+                      <option value="person">👤 Person</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
